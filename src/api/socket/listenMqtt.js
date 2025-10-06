@@ -146,7 +146,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
     }
   });
   mqttClient.on("connect", function () {
-    if (global.fca.mqtt.enabled) {
+    if (global.fca.config.mqtt.enabled) {
     let StopProcessing = true;
     mqttReconnectCount = 0;
     setInterval(() => {
@@ -196,7 +196,7 @@ function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
       getSeqID();
       console.log('Kết Nối Lại MQTT Thành Công');
       }
-    }, global.fca.mqtt.reconnectMQTT_Minutes * 60 * 1000);
+    }, global.fca.config.mqtt.reconnectMQTT_Minutes * 60 * 1000);
     };
     if (process.env.OnStatus === undefined) {
       logger("fca-unoffcial premium", "info");
