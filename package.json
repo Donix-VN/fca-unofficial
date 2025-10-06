@@ -1,11 +1,11 @@
 {
   "name": "@dongdev/fca-unofficial",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "A Facebook chat API without XMPP, will not be deprecated after April 30th, 2015.",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DongDev-VN/fca-unofficial.git"
+    "url": "git+https://github.com/Donix-VN/fca-unofficial.git"
   },
   "author": "Avery, David, Maude, Benjamin, UIRI, DongDev, LunarKrystal",
   "license": "MIT",
