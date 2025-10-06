@@ -1,0 +1,634 @@
+const fs = require("fs");
+const path = require("path");
+const models = require("../src/database/models");
+const logger = require("../func/logger");
+const { get, post, jar, makeDefaults } = require("../src/utils/request");
+const { saveCookies, getAppState } = require("../src/utils/client");
+const { getFrom } = require("../src/utils/constants");
+const config = require(process.cwd() + "/fca-config.json");
+const { v4: uuidv4 } = require("uuid");
+const { CookieJar } = require("tough-cookie");
+const { wrapper } = require("axios-cookiejar-support");
+const axiosBase = require("axios");
+const qs = require("querystring");
+const crypto = require("crypto");
+const { TOTP } = require("totp-generator");
+
+const regions = [
+  { code: "PRN", name: "Pacific Northwest Region", location: "Khu vực Tây Bắc Thái Bình Dương" },
+  { code: "VLL", name: "Valley Region", location: "Valley" },
+  { code: "ASH", name: "Ashburn Region", location: "Ashburn" },
+  { code: "DFW", name: "Dallas/Fort Worth Region", location: "Dallas/Fort Worth" },
+  { code: "LLA", name: "Los Angeles Region", location: "Los Angeles" },
+  { code: "FRA", name: "Frankfurt", location: "Frankfurt" },
+  { code: "SIN", name: "Singapore", location: "Singapore" },
+  { code: "NRT", name: "Tokyo", location: "Japan" },
+  { code: "HKG", name: "Hong Kong", location: "Hong Kong" },
+  { code: "SYD", name: "Sydney", location: "Sydney" },
+  { code: "PNB", name: "Pacific Northwest - Beta", location: "Pacific Northwest " }
+];
+
+const REGION_MAP = new Map(regions.map(r => [r.code, r]));
+
+function parseRegion(html) {
+  try {
+    const m1 = html.match(/"endpoint":"([^"]+)"/);
+    const m2 = m1 ? null : html.match(/endpoint\\":\\"([^\\"]+)\\"/);
+    const raw = (m1 && m1[1]) || (m2 && m2[1]);
+    if (!raw) return "PRN";
+    const endpoint = raw.replace(/\\\//g, "/");
+    const url = new URL(endpoint);
+    const rp = url.searchParams ? url.searchParams.get("region") : null;
+    return rp ? rp.toUpperCase() : "PRN";
+  } catch {
+    return "PRN";
+  }
+}
+
+function mask(s, keep = 3) {
+  if (!s) return "";
+  const n = s.length;
+  return n <= keep ? "*".repeat(n) : s.slice(0, keep) + "*".repeat(Math.max(0, n - keep));
+}
+
+function md5(s) {
+  return crypto.createHash("md5").update(s).digest("hex");
+}
+
+function randomString(length = 24) {
+  let s = "abcdefghijklmnopqrstuvwxyz";
+  let out = s.charAt(Math.floor(Math.random() * s.length));
+  for (let i = 1; i < length; i++) out += "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(36 * Math.random()));
+  return out;
+}
+
+function sortObject(o) {
+  const keys = Object.keys(o).sort();
+  const x = {};
+  for (const k of keys) x[k] = o[k];
+  return x;
+}
+
+function encodeSig(obj) {
+  let data = "";
+  for (const k of Object.keys(obj)) data += `${k}=${obj[k]}`;
+  return md5(data + "62f8ce9f74b12f84c123cc23437a4a32");
+}
+
+function rand(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function choice(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function randomBuildId() {
+  const prefixes = ["QP1A", "RP1A", "SP1A", "TP1A", "UP1A", "AP4A"];
+  return `${choice(prefixes)}.${rand(180000, 250000)}.${rand(10, 99)}`;
+}
+
+function randomResolution() {
+  const presets = [{ w: 720, h: 1280, d: 2.0 }, { w: 1080, h: 1920, d: 2.625 }, { w: 1080, h: 2400, d: 3.0 }, { w: 1440, h: 3040, d: 3.5 }, { w: 1440, h: 3200, d: 4.0 }];
+  return choice(presets);
+}
+
+function randomFbav() {
+  return `${rand(390, 499)}.${rand(0, 3)}.${rand(0, 2)}.${rand(10, 60)}.${rand(100, 999)}`;
+}
+
+function randomOrcaUA() {
+  const androidVersions = ["8.1.0", "9", "10", "11", "12", "13", "14"];
+  const devices = [{ brand: "samsung", model: "SM-G996B" }, { brand: "samsung", model: "SM-S908E" }, { brand: "Xiaomi", model: "M2101K9AG" }, { brand: "OPPO", model: "CPH2219" }, { brand: "vivo", model: "V2109" }, { brand: "HUAWEI", model: "VOG-L29" }, { brand: "asus", model: "ASUS_I001DA" }, { brand: "Google", model: "Pixel 6" }, { brand: "realme", model: "RMX2170" }];
+  const carriers = ["Viettel Telecom", "Mobifone", "Vinaphone", "T-Mobile", "Verizon", "AT&T", "Telkomsel", "Jio", "NTT DOCOMO", "Vodafone", "Orange"];
+  const locales = ["vi_VN", "en_US", "en_GB", "id_ID", "th_TH", "fr_FR", "de_DE", "es_ES", "pt_BR"];
+  const archs = ["arm64-v8a", "armeabi-v7a"];
+  const a = choice(androidVersions);
+  const d = choice(devices);
+  const b = randomBuildId();
+  const r = randomResolution();
+  const fbav = randomFbav();
+  const fbbv = rand(320000000, 520000000);
+  const arch = `${choice(archs)}:${choice(archs)}`;
+  const ua = `Dalvik/2.1.0 (Linux; U; Android ${a}; ${d.model} Build/${b}) [FBAN/Orca-Android;FBAV/${fbav};FBPN/com.facebook.orca;FBLC/${choice(locales)};FBBV/${fbbv};FBCR/${choice(carriers)};FBMF/${d.brand};FBBD/${d.brand};FBDV/${d.model};FBSV/${a};FBCA/${arch};FBDM/{density=${r.d.toFixed(1)},width=${r.w},height=${r.h}};FB_FW/1;]`;
+  return ua;
+}
+
+const MOBILE_UA = randomOrcaUA();
+
+function buildHeaders(url, extra = {}) {
+  const u = new URL(url);
+  return { "content-type": "application/x-www-form-urlencoded", "x-fb-http-engine": "Liger", "user-agent": MOBILE_UA, Host: u.host, Origin: "https://www.facebook.com", Referer: "https://www.facebook.com/", Connection: "keep-alive", ...extra };
+}
+
+const genTotp = async secret => {
+  const cleaned = String(secret || "").replace(/\s+/g, "").toUpperCase();
+  const r = await TOTP.generate(cleaned);
+  return typeof r === "object" ? r.otp : r;
+};
+
+function cookieHeaderFromJar(j) {
+  const urls = ["https://www.facebook.com", "https://www.messenger.com"];
+  const seen = new Set();
+  const parts = [];
+  for (const u of urls) {
+    let s = "";
+    try {
+      s = typeof j.getCookieStringSync === "function" ? j.getCookieStringSync(u) : "";
+    } catch {}
+    if (!s) continue;
+    for (const kv of s.split(";")) {
+      const t = kv.trim();
+      const name = t.split("=")[0];
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      parts.push(t);
+    }
+  }
+  return parts.join("; ");
+}
+
+let uniqueIndexEnsured = false;
+
+function getBackupModel() {
+  if (!models || !models.sequelize || !models.Sequelize) return null;
+  const sequelize = models.sequelize;
+  const { DataTypes } = models.Sequelize;
+  if (sequelize.models && sequelize.models.AppStateBackup) return sequelize.models.AppStateBackup;
+  const dialect = typeof sequelize.getDialect === "function" ? sequelize.getDialect() : "sqlite";
+  const LongText = (dialect === "mysql" || dialect === "mariadb") ? DataTypes.TEXT("long") : DataTypes.TEXT;
+  const AppStateBackup = sequelize.define(
+    "AppStateBackup",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      userID: { type: DataTypes.STRING, allowNull: false },
+      type: { type: DataTypes.STRING, allowNull: false },
+      data: { type: LongText }
+    },
+    { tableName: "app_state_backups", timestamps: true, indexes: [{ unique: true, fields: ["userID", "type"] }] }
+  );
+  return AppStateBackup;
+}
+
+async function ensureUniqueIndex(sequelize) {
+  if (uniqueIndexEnsured) return;
+  try {
+    await sequelize.getQueryInterface().addIndex("app_state_backups", ["userID", "type"], { unique: true, name: "app_state_user_type_unique" });
+  } catch {}
+  uniqueIndexEnsured = true;
+}
+
+async function upsertBackup(Model, userID, type, data) {
+  const where = { userID: String(userID || ""), type };
+  const row = await Model.findOne({ where });
+  if (row) {
+    await row.update({ data });
+    logger(`Overwrote existing ${type} backup for user ${where.userID}`, "info");
+    return;
+  }
+  await Model.create({ ...where, data });
+  logger(`Created new ${type} backup for user ${where.userID}`, "info");
+}
+
+async function backupAppStateSQL(j, userID) {
+  try {
+    const Model = getBackupModel();
+    if (!Model) return;
+    await Model.sync();
+    await ensureUniqueIndex(models.sequelize);
+    const appJson = getAppState(j);
+    const ck = cookieHeaderFromJar(j);
+    await upsertBackup(Model, userID, "appstate", JSON.stringify(appJson));
+    await upsertBackup(Model, userID, "cookie", ck);
+    logger("Backup stored (overwrite mode)", "info");
+  } catch (e) {
+    logger(`Failed to save appstate backup ${e && e.message ? e.message : String(e)}`, "warn");
+  }
+}
+
+async function getLatestBackup(userID, type) {
+  try {
+    const Model = getBackupModel();
+    if (!Model) return null;
+    const row = await Model.findOne({ where: { userID: String(userID || ""), type } });
+    return row ? row.data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getLatestBackupAny(type) {
+  try {
+    const Model = getBackupModel();
+    if (!Model) return null;
+    const row = await Model.findOne({ where: { type }, order: [["updatedAt", "DESC"]] });
+    return row ? row.data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function tokens(username, password, twofactor = null) {
+  const t0 = process.hrtime.bigint();
+  if (!username || !password) {
+    logger("Missing email or password", {}, "error");
+    return { status: false, message: "Please provide email and password" };
+  }
+  logger(`AUTO-LOGIN: Initialize login ${mask(username, 2)}`, "info");
+  const cj = new CookieJar();
+  const axios = wrapper(axiosBase.create({ jar: cj, withCredentials: true, validateStatus: () => true, timeout: 30000 }));
+  const loginUrl = "https://b-graph.facebook.com/auth/login";
+  const baseForm = { adid: uuidv4(), email: username, password: password, format: "json", device_id: uuidv4(), cpl: "true", family_device_id: uuidv4(), locale: "en_US", client_country_code: "US", credentials_type: "device_based_login_password", generate_session_cookies: "1", generate_analytics_claim: "1", generate_machine_id: "1", currently_logged_in_userid: "0", irisSeqID: 1, try_num: "1", enroll_misauth: "false", meta_inf_fbmeta: "", source: "login", machine_id: randomString(24), fb_api_req_friendly_name: "authenticate", fb_api_caller_class: "com.facebook.account.login.protocol.Fb4aAuthHandler", api_key: "882a8490361da98702bf97a021ddc14d", access_token: "350685531728%7C62f8ce9f74b12f84c123cc23437a4a32" };
+  try {
+    const form1 = { ...baseForm };
+    form1.sig = encodeSig(sortObject(form1));
+    logger("AUTO-LOGIN: Send login request", "info");
+    const r0 = process.hrtime.bigint();
+    const res1 = await axios.post(loginUrl, qs.stringify(form1), { headers: buildHeaders(loginUrl, { "x-fb-friendly-name": form1.fb_api_req_friendly_name }) });
+    const dt1 = Number(process.hrtime.bigint() - r0) / 1e6;
+    logger(`AUTO-LOGIN: Received response ${res1.status} ${Math.round(dt1)}ms`, "info");
+    if (res1.status >= 400) throw { response: res1 };
+    if (res1.data && res1.data.session_cookies) {
+      const cookies = res1.data.session_cookies.map(e => ({ key: e.name, value: e.value, domain: "facebook.com", path: e.path, hostOnly: false }));
+      logger(`AUTO-LOGIN: Login success (first attempt) ${cookies.length} cookies`, "info");
+      const t1 = Number(process.hrtime.bigint() - t0) / 1e6;
+      logger(`Done success login ${Math.round(t1)}ms`, "info");
+      return { status: true, cookies };
+    }
+    throw { response: res1 };
+  } catch (err) {
+    const e = err && err.response ? err.response : null;
+    const code = e && e.data && e.data.error ? e.data.error.code : null;
+    const message = e && e.data && e.data.error ? e.data.error.message : "";
+    if (code) logger(`AUTO-LOGIN: Error on request #1 ${code} ${message}`, "warn");
+    logger("AUTO-LOGIN: Processing twofactor...", "info");
+    if (code === 401) return { status: false, message: message || "Unauthorized" };
+    if (twofactor === "0" || !twofactor) {
+      logger("AUTO-LOGIN: 2FA required but secret missing", {}, "warn");
+      return { status: false, message: "Please provide the 2FA secret!" };
+    }
+    try {
+      const dataErr = e && e.data && e.data.error && e.data.error.error_data ? e.data.error.error_data : {};
+      const codeTotp = await genTotp(twofactor);
+      logger(`AUTO-LOGIN: Performing 2FA ${mask(codeTotp, 2)}`, "info");
+      const form2 = { ...baseForm, twofactor_code: codeTotp, encrypted_msisdn: "", userid: dataErr.uid || "", machine_id: dataErr.machine_id || baseForm.machine_id, first_factor: dataErr.login_first_factor || "", credentials_type: "two_factor" };
+      form2.sig = encodeSig(sortObject(form2));
+      const r1 = process.hrtime.bigint();
+      const res2 = await axios.post(loginUrl, qs.stringify(form2), { headers: buildHeaders(loginUrl, { "x-fb-friendly-name": form2.fb_api_req_friendly_name }) });
+      const dt2 = Number(process.hrtime.bigint() - r1) / 1e6;
+      logger(`AUTO-LOGIN: Received 2FA response ${res2.status} ${Math.round(dt2)}ms`, "info");
+      if (res2.status >= 400 || !(res2.data && res2.data.session_cookies)) throw new Error("2FA failed");
+      const cookies = res2.data.session_cookies.map(e => ({ key: e.name, value: e.value, domain: "facebook.com", path: e.path, hostOnly: false }));
+      logger(`AUTO-LOGIN: Login success with 2FA ${cookies.length} cookies`, "info");
+      const t1 = Number(process.hrtime.bigint() - t0) / 1e6;
+      logger(`AUTO-LOGIN: Done success login with 2FA ${Math.round(t1)}ms`, "info");
+      return { status: true, cookies };
+    } catch {
+      logger("AUTO-LOGIN: 2FA failed", {}, "error");
+      return { status: false, message: "Invalid two-factor code!" };
+    }
+  }
+}
+
+function normalizeCookieHeaderString(s) {
+  let str = String(s || "").trim();
+  if (!str) return [];
+  if (/^cookie\s*:/i.test(str)) str = str.replace(/^cookie\s*:/i, "").trim();
+  str = str.replace(/\r?\n/g, " ").replace(/\s*;\s*/g, ";");
+  const parts = str.split(";").map(v => v.trim()).filter(Boolean);
+  const out = [];
+  for (const p of parts) {
+    const eq = p.indexOf("=");
+    if (eq <= 0) continue;
+    const k = p.slice(0, eq).trim();
+    const v = p.slice(eq + 1).trim().replace(/^"(.*)"$/, "$1");
+    if (!k) continue;
+    out.push(`${k}=${v}`);
+  }
+  return out;
+}
+
+function setJarFromPairs(j, pairs, domain) {
+  const expires = new Date(Date.now() + 31536e6).toUTCString();
+  for (const kv of pairs) {
+    const cookieStr = `${kv}; expires=${expires}; domain=${domain}; path=/;`;
+    try {
+      if (typeof j.setCookieSync === "function") j.setCookieSync(cookieStr, "https://www.facebook.com");
+      else j.setCookie(cookieStr, "https://www.facebook.com");
+    } catch {}
+  }
+}
+
+function makeLogin(j, email, password, globalOptions, callback, prCallback) {
+  return async function () {
+    const u = email || config.email;
+    const p = password || config.password;
+    const tf = config.twofactor || null;
+    if (!u || !p) return;
+    const r = await tokens(u, p, tf);
+    if (r && r.status && Array.isArray(r.cookies)) {
+      const pairs = r.cookies.map(c => `${c.key || c.name}=${c.value}`);
+      setJarFromPairs(j, pairs, ".facebook.com");
+      await get("https://www.facebook.com/", j, null, globalOptions).then(saveCookies(j));
+    } else {
+      throw new Error(r && r.message ? r.message : "Login failed");
+    }
+  };
+}
+
+async function hydrateJarFromDB(userID) {
+  try {
+    let ck = null;
+    let app = null;
+    if (userID) {
+      ck = await getLatestBackup(userID, "cookie");
+      app = await getLatestBackup(userID, "appstate");
+    } else {
+      ck = await getLatestBackupAny("cookie");
+      app = await getLatestBackupAny("appstate");
+    }
+    if (ck) {
+      const pairs = normalizeCookieHeaderString(ck);
+      if (pairs.length) {
+        setJarFromPairs(jar, pairs, ".facebook.com");
+        return true;
+      }
+    }
+    if (app) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(app);
+      } catch {}
+      if (Array.isArray(parsed)) {
+        const pairs = parsed.map(c => [c.name || c.key, c.value].join("="));
+        setJarFromPairs(jar, pairs, ".facebook.com");
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) {
+  const getUID = cs =>
+    cs.find(c => c.key === "i_user")?.value ||
+    cs.find(c => c.key === "c_user")?.value ||
+    cs.find(c => c.name === "i_user")?.value ||
+    cs.find(c => c.name === "c_user")?.value;
+
+  let userID = getUID(currentCookies);
+  if (userID) return { html: currentHtml, cookies: currentCookies, userID };
+
+  const hydrated = await hydrateJarFromDB(null);
+  if (hydrated) {
+    logger("AppState backup live — proceeding to login", "info");
+    const resB = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+    const htmlB = resB && resB.data ? resB.data : "";
+    if (htmlB.includes("/checkpoint/block/?next")) throw new Error("Checkpoint");
+    const cookiesB = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
+    const uidB = getUID(cookiesB);
+    if (uidB) return { html: htmlB, cookies: cookiesB, userID: uidB };
+  }
+
+  logger("AppState backup die — proceeding to email/password login", "warn");
+  const u = config.email;
+  const p = config.password;
+  const tf = config.twofactor || null;
+  if (!u || !p) throw new Error("Missing user cookie");
+  const r = await tokens(u, p, tf);
+  if (!(r && r.status && Array.isArray(r.cookies))) throw new Error(r && r.message ? r.message : "Login failed");
+  const pairs = r.cookies.map(c => `${c.key || c.name}=${c.value}`);
+  setJarFromPairs(jar, pairs, ".facebook.com");
+  const res2 = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+  const html2 = res2 && res2.data ? res2.data : "";
+  if (html2.includes("/checkpoint/block/?next")) throw new Error("Checkpoint");
+  const cookies2 = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
+  const uid2 = getUID(cookies2);
+  if (!uid2) throw new Error("Login failed");
+  return { html: html2, cookies: cookies2, userID: uid2 };
+}
+
+function loginHelper(appState, Cookie, email, password, globalOptions, callback, prCallback) {
+  try {
+    let main;
+    const domain = ".facebook.com";
+    try {
+      if (appState) {
+        if (typeof appState === "string") {
+          let parsed = appState;
+          try {
+            parsed = JSON.parse(appState);
+          } catch {}
+          if (Array.isArray(parsed)) {
+            const pairs = parsed.map(c => [c.name || c.key, c.value].join("="));
+            setJarFromPairs(jar, pairs, domain);
+          } else if (typeof parsed === "string") {
+            const pairs = normalizeCookieHeaderString(parsed);
+            if (!pairs.length) throw new Error("Empty appState cookie header");
+            setJarFromPairs(jar, pairs, domain);
+          } else {
+            throw new Error("Invalid appState format");
+          }
+        } else if (Array.isArray(appState)) {
+          const pairs = appState.map(c => [c.name || c.key, c.value].join("="));
+          setJarFromPairs(jar, pairs, domain);
+        } else {
+          throw new Error("Invalid appState format");
+        }
+      }
+      if (Cookie) {
+        let cookiePairs = [];
+        if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString(Cookie);
+        else if (Array.isArray(Cookie)) cookiePairs = Cookie.map(String).filter(Boolean);
+        else if (Cookie && typeof Cookie === "object") cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
+        if (cookiePairs.length) setJarFromPairs(jar, cookiePairs, domain);
+      }
+    } catch (e) {
+      return callback(e);
+    }
+
+    (async () => {
+      if (appState || Cookie) {
+        return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+      }
+      const hydrated = await hydrateJarFromDB(null);
+      if (hydrated) {
+        logger("AppState backup live — proceeding to login", "info");
+        return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+      }
+      logger("AppState backup die — proceeding to email/password login", "warn");
+      return get("https://www.facebook.com/", null, null, globalOptions)
+        .then(saveCookies(jar))
+        .then(makeLogin(jar, email, password, globalOptions, callback, prCallback))
+        .then(function () {
+          return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+        });
+    })()
+      .then(async function (res) {
+        let html = res && res.data ? res.data : "";
+        let cookies = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
+        let userID =
+          cookies.find(c => c.key === "i_user")?.value ||
+          cookies.find(c => c.key === "c_user")?.value ||
+          cookies.find(c => c.name === "i_user")?.value ||
+          cookies.find(c => c.name === "c_user")?.value;
+
+        try {
+          const userDataMatch = String(html).match(/\["CurrentUserInitialData",\[\],({.*?}),\d+\]/);
+          if (userDataMatch) {
+            const info = JSON.parse(userDataMatch[1]);
+            logger(`Đăng nhập tài khoản: ${info.NAME} (${info.USER_ID})`, "info");
+          } else if (userID) {
+            logger(`ID người dùng: ${userID}`, "info");
+          }
+        } catch {}
+
+        if (!userID) {
+          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions);
+          html = retried.html;
+          cookies = retried.cookies;
+          userID = retried.userID;
+        }
+
+        if (html.includes("/checkpoint/block/?next")) {
+          logger("Appstate die, vui lòng thay cái mới!", "error");
+          throw new Error("Checkpoint");
+        }
+
+        let mqttEndpoint;
+        let region = "PRN";
+        let fb_dtsg;
+        let irisSeqID;
+
+        try {
+          const m1 = html.match(/"endpoint":"([^"]+)"/);
+          const m2 = m1 ? null : html.match(/endpoint\\":\\"([^\\"]+)\\"/);
+          const raw = (m1 && m1[1]) || (m2 && m2[1]);
+          if (raw) mqttEndpoint = raw.replace(/\\\//g, "/");
+          region = parseRegion(html);
+          const rinfo = REGION_MAP.get(region);
+          if (rinfo) logger(`Server region ${region} - ${rinfo.name}`, "info");
+          else logger(`Server region ${region}`, "info");
+        } catch {
+          logger("Not MQTT endpoint", "warn");
+        }
+        try {
+          const userDataMatch = String(html).match(/\["CurrentUserInitialData",\[\],({.*?}),\d+\]/);
+          if (userDataMatch) {
+            const info = JSON.parse(userDataMatch[1]);
+            logger(`Đăng nhập tài khoản: ${info.NAME} (${info.USER_ID})`, "info");
+          } else if (userID) {
+            logger(`ID người dùng: ${userID}`, "info");
+          }
+        } catch { }
+        const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
+        if (tokenMatch) fb_dtsg = tokenMatch[1];
+
+        try {
+          if (userID) await backupAppStateSQL(jar, userID);
+        } catch {}
+
+        Promise.resolve()
+          .then(function () {
+            if (models && models.sequelize && typeof models.sequelize.authenticate === "function") {
+              return models.sequelize.authenticate();
+            }
+          })
+          .then(function () {
+            if (models && typeof models.syncAll === "function") {
+              return models.syncAll();
+            }
+          })
+          .catch(function (error) {
+            console.error(error);
+            console.error("Database connection failed:", error && error.message ? error.message : String(error));
+          });
+
+        logger("FCA fix/update by DongDev", "info");
+
+        const ctx = {
+          userID,
+          jar,
+          globalOptions,
+          loggedIn: true,
+          access_token: "NONE",
+          clientMutationId: 0,
+          mqttClient: undefined,
+          lastSeqId: irisSeqID,
+          syncToken: undefined,
+          mqttEndpoint,
+          region,
+          firstListen: true,
+          fb_dtsg,
+          clientID: ((Math.random() * 2147483648) | 0).toString(16),
+          clientId: getFrom(html, '["MqttWebDeviceID",[],{"clientID":"', '"}') || "",
+          wsReqNumber: 0,
+          wsTaskNumber: 0
+        };
+
+        const api = {
+          setOptions: require("./options").setOptions.bind(null, globalOptions),
+          getCookies: function () {
+            return cookieHeaderFromJar(jar);
+          },
+          getAppState: function () {
+            return getAppState(jar);
+          },
+          getLatestAppStateFromDB: async function (uid = userID) {
+            const data = await getLatestBackup(uid, "appstate");
+            return data ? JSON.parse(data) : null;
+          },
+          getLatestCookieFromDB: async function (uid = userID) {
+            return await getLatestBackup(uid, "cookie");
+          }
+        };
+
+        const defaultFuncs = makeDefaults(html, userID, ctx);
+        const srcRoot = path.join(__dirname, "../src/api");
+        let loaded = 0;
+        let skipped = 0;
+        fs.readdirSync(srcRoot, { withFileTypes: true }).forEach((sub) => {
+          if (!sub.isDirectory()) return;
+          const subDir = path.join(srcRoot, sub.name);
+          fs.readdirSync(subDir, { withFileTypes: true }).forEach((entry) => {
+            if (!entry.isFile() || !entry.name.endsWith(".js")) return;
+            const p = path.join(subDir, entry.name);
+            const key = path.basename(entry.name, ".js");
+            if (api[key]) {
+              skipped++;
+              return;
+            }
+            api[key] = require(p)(defaultFuncs, api, ctx);
+            loaded++;
+          });
+        });
+
+        logger(`Loaded ${loaded} FCA API methods${skipped ? `, skipped ${skipped} duplicates` : ""}`, "[ FCA-UNO ] >");
+
+        api.listen = api.listenMqtt;
+
+        setInterval(function () {
+          api
+            .refreshFb_dtsg()
+            .then(function () {
+              logger("Successfully refreshed fb_dtsg", "[ FCA-UNO ] >");
+            })
+            .catch(function () {
+              logger("An error occurred while refreshing fb_dtsg", "error");
+            });
+        }, 86400000);
+
+        logger("Login successful!", "[ FCA-UNO ] >");
+        callback(null, api);
+      })
+      .catch(function (e) {
+        callback(e);
+      });
+  } catch (e) {
+    callback(e);
+  }
+}
+
+module.exports = loginHelper;
