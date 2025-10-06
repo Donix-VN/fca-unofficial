@@ -3,35 +3,36 @@
 const { Transform } = require("stream");
 const Duplexify = require("duplexify");
 
-let WebSocket_Global;
-function buildProxy() {
+// Instead of using a global WebSocket variable, pass it directly.
+function buildProxy(wsInstance) {
   const Proxy = new Transform({
     objectMode: false,
+
     transform(chunk, enc, next) {
-      if (WebSocket_Global.readyState !== WebSocket.OPEN) {
+      if (!wsInstance || wsInstance.readyState !== 1) { // 1 === WebSocket.OPEN
         return next();
       }
       const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
       try {
-        WebSocket_Global.send(data);
+        wsInstance.send(data);
         next();
       } catch (err) {
         console.error("WebSocket send error:", err);
         next(err);
       }
     },
+
     flush(done) {
-      if (WebSocket_Global.readyState === WebSocket.OPEN) {
-        WebSocket_Global.close();
+      if (wsInstance && wsInstance.readyState === 1) {
+        wsInstance.close();
       }
       done();
     },
+
     writev(chunks, cb) {
       try {
         for (const { chunk } of chunks) {
-          this.push(
-            Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8")
-          );
+          this.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"));
         }
         cb();
       } catch (err) {
@@ -43,25 +44,32 @@ function buildProxy() {
 
   return Proxy;
 }
-function buildStream(options, WebSocket, Proxy) {
+
+function buildStream(options, wsInstance) {
+  const Proxy = buildProxy(wsInstance);
   const Stream = Duplexify(undefined, undefined, options);
-  Stream.socket = WebSocket;
+  Stream.socket = wsInstance;
+
   let pingInterval;
   let reconnectTimeout;
+
   const clearTimers = () => {
     clearInterval(pingInterval);
     clearTimeout(reconnectTimeout);
   };
-  WebSocket.onclose = () => {
+
+  wsInstance.onclose = () => {
     clearTimers();
     Stream.end();
     Stream.destroy();
   };
-  WebSocket.onerror = err => {
+
+  wsInstance.onerror = err => {
     clearTimers();
     Stream.destroy(err);
   };
-  WebSocket.onmessage = event => {
+
+  wsInstance.onmessage = event => {
     clearTimeout(reconnectTimeout);
     const data =
       event.data instanceof ArrayBuffer
@@ -69,32 +77,32 @@ function buildStream(options, WebSocket, Proxy) {
         : Buffer.from(event.data, "utf8");
     Stream.push(data);
   };
-  WebSocket.onopen = () => {
+
+  wsInstance.onopen = () => {
     Stream.setReadable(Proxy);
     Stream.setWritable(Proxy);
     Stream.emit("connect");
     pingInterval = setInterval(() => {
-      if (WebSocket.readyState === WebSocket.OPEN) {
-        WebSocket.ping();
+      if (wsInstance.readyState === 1 && typeof wsInstance.ping === "function") {
+        wsInstance.ping();
       }
     }, 30000);
+
     reconnectTimeout = setTimeout(() => {
-      if (WebSocket.readyState === WebSocket.OPEN) {
-        WebSocket.close();
+      if (wsInstance.readyState === 1) {
+        wsInstance.close();
         Stream.end();
         Stream.destroy();
       }
     }, 60000);
   };
-  WebSocket_Global = WebSocket;
+
   Proxy.on("close", () => {
     clearTimers();
-    WebSocket.close();
+    wsInstance.close();
   });
+
   return Stream;
 }
 
-module.exports = {
-  buildProxy,
-  buildStream
-};
+module.exports = { buildProxy, buildStream };

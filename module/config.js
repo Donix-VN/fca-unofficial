@@ -3,7 +3,7 @@ const path = require("path");
 const logger = require("../func/logger");
 const defaultConfig = {
   autoUpdate: true,
-  mqtt: { enabled: true, reconnectInterval: 3600 },
+  mqtt: { enabled: true, reconnectMQTT_Minutes: 90 },
   autoLogin: true,
   credentials: { email: "", password: "", twofactor: "" }
 };

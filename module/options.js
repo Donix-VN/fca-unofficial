@@ -1,3 +1,4 @@
+const log = require("npmlog");
 const utils = require("../src/utils");
 const logger = require("../func/logger");
 const Boolean_Option = [
