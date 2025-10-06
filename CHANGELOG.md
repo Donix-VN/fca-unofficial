@@ -44,3 +44,7 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 
 ## v2.0.4 - 2025-10-05
 - Hotfix / auto bump
+
+## v2.0.5 - 2025-10-06
+- Now you can turn on/off autoLogin in config file.
+- Added autoUpdate feature.
