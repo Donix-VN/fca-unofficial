@@ -2,9 +2,11 @@
 const utils = require("../src/utils");
 const { setOptions } = require("./options");
 const { loadConfig } = require("./config");
-const loginHelper = require("./loginHelper");
 const { config } = loadConfig();
+if (config.autoUpdate) require("../func/checkUpdate").checkAndUpdateVersion(() => {});
 global.fca = { config };
+const loginHelper = require("./loginHelper");
+
 function login(loginData, options, callback) {
   if (utils.getType(options) === "Function" || utils.getType(options) === "AsyncFunction") {
     callback = options;

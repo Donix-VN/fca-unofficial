@@ -321,9 +321,9 @@ function setJarFromPairs(j, pairs, domain) {
 
 function makeLogin(j, email, password, globalOptions, callback, prCallback) {
   return async function () {
-    const u = email || config.email;
-    const p = password || config.password;
-    const tf = config.twofactor || null;
+    const u = email || config.credentials.email;
+    const p = password || config.credentials.password;
+    const tf = config.credentials.twofactor || null;
     if (!u || !p) return;
     const r = await tokens(u, p, tf);
     if (r && r.status && Array.isArray(r.cookies)) {
@@ -392,10 +392,11 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) 
     if (uidB) return { html: htmlB, cookies: cookiesB, userID: uidB };
   }
 
+  if (config.autoLogin !== true) throw new Error("AppState backup die — Auto-login is disabled");
   logger("AppState backup die — proceeding to email/password login", "warn");
-  const u = config.email;
-  const p = config.password;
-  const tf = config.twofactor || null;
+  const u = config.credentials.email;
+  const p = config.credentials.password;
+  const tf = config.credentials.twofactor || null;
   if (!u || !p) throw new Error("Missing user cookie");
   const r = await tokens(u, p, tf);
   if (!(r && r.status && Array.isArray(r.cookies))) throw new Error(r && r.message ? r.message : "Login failed");
