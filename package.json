@@ -1,14 +1,50 @@
 {
   "name": "@dongdev/fca-unofficial",
-  "version": "2.0.8",
-  "description": "A Facebook chat API without XMPP, will not be deprecated after April 30th, 2015.",
+  "version": "2.0.9",
+  "description": "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
   "main": "index.js",
+  "scripts": {
+    "test": "mocha",
+    "lint": "eslint .",
+    "prepublishOnly": "npm test"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Donix-VN/fca-unofficial.git"
   },
-  "author": "Avery, David, Maude, Benjamin, UIRI, DongDev (Donix-VN), LunarKrystal",
+  "keywords": [
+    "facebook",
+    "chat",
+    "api",
+    "messenger",
+    "bot",
+    "unofficial",
+    "automation",
+    "facebook-api",
+    "facebook-chat",
+    "facebook-messenger",
+    "chatbot",
+    "nodejs",
+    "fca"
+  ],
+  "author": {
+    "name": "DongDev",
+    "url": "https://www.facebook.com/mdong.dev"
+  },
+  "contributors": [
+    {
+      "name": "DongDev",
+      "url": "https://github.com/Donix-VN"
+    }
+  ],
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Donix-VN/fca-unofficial/issues"
+  },
+  "homepage": "https://github.com/Donix-VN/fca-unofficial#readme",
+  "engines": {
+    "node": ">=12.0.0"
+  },
   "dependencies": {
     "axios": "latest",
     "axios-cookiejar-support": "^5.0.5",
@@ -27,31 +63,21 @@
     "ws": "^8.18.1"
   },
   "devDependencies": {
-    "eslint": "^7.5.0",
-    "mocha": "^10.2.0",
-    "prettier": "^3.3.3"
+    "eslint": "^8.50.0",
+    "mocha": "^10.2.0"
   },
-  "scripts": {
-    "test": "mocha",
-    "lint": "eslint . --ext .js,.cjs,.mjs,.ts,.tsx",
-    "prettier": "prettier \"**/*.{js,cjs,mjs,ts,tsx,json,md,css,scss,html,yml,yaml}\" --ignore-unknown --write"
-  },
-  "keywords": [
-    "facebook",
-    "chat",
-    "api",
-    "fca",
-    "facebook-chat-api"
+  "optionalDependencies": {},
+  "peerDependencies": {},
+  "files": [
+    "index.js",
+    "src/",
+    "utils/",
+    "README.md",
+    "LICENSE",
+    "DOCS.md"
   ],
-  "engines": {
-    "node": ">=10.x"
-  },
-  "types": "index.d.ts",
-  "homepage": "https://github.com/Donix-VN/fca-unofficial#readme",
-  "bugs": {
-    "url": "https://github.com/Donix-VN/fca-unofficial/issues"
-  },
-  "directories": {
-    "test": "test"
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

@@ -1,238 +1,320 @@
-<div align="center">
+# @dongdev/fca-unofficial
 
-![20241210_183831](https://files.catbox.moe/4rl0za.webp)
+[![npm version](https://img.shields.io/npm/v/@dongdev/fca-unofficial.svg)](https://www.npmjs.com/package/@dongdev/fca-unofficial)
+[![npm downloads](https://img.shields.io/npm/dm/@dongdev/fca-unofficial.svg)](https://www.npmjs.com/package/@dongdev/fca-unofficial)
 
-<h2 align="center"><b>Unoffcial Facebook Chat API</b></h2><br>This package is created by <b>DongDev</b>
+> **Unofficial Facebook Chat API for Node.js** - Interact with Facebook Messenger programmatically
 
-![Image](https://files.catbox.moe/8urnyq.png)
+## ⚠️ Important Disclaimer
 
-_Disclaimer_: We are not responsible if your account gets banned for spammy activities such as sending lots of messages to people you don't know, sending messages very quickly, sending spammy looking URLs, logging in and out very quickly... Be responsible Facebook citizens.
+**We are not responsible if your account gets banned for spammy activities such as:**
+- Sending lots of messages to people you don't know
+- Sending messages very quickly
+- Sending spammy looking URLs
+- Logging in and out very quickly
 
-> We the @dongdev/fca-unofficiala team/contributors are recommending you to use the Firefox app for less logout, or use this website if you have no access on these browsers specially iOS user.
+**Recommendation:** Use Firefox browser or [this website](https://fca.dongdev.id.vn) to reduce logout issues, especially for iOS users.
 
-If you encounter errors on fca, you can contact me [here](https://www.facebook.com/minhdong.dev)
+**Support:** If you encounter errors, contact us [here](https://www.facebook.com/minhdong.dev)
 
-Facebook now has an official API for chat bots [here](https://developers.facebook.com/docs/messenger-platform).
+## 🔍 Introduction
 
-This API is the only way to automate chat functionalities on a user account. We do this by emulating the browser. This means doing the exact same GET/POST requests and tricking Facebook into thinking we're accessing the website normally. Because we're doing it this way, this API won't work with an auth token but requires the credentials of a Facebook account.
+Facebook now has an [official API for chat bots](https://developers.facebook.com/docs/messenger-platform), however it's only available for Facebook Pages.
 
-## Install
+`@dongdev/fca-unofficial` is the only API that allows you to automate chat functionalities on a **user account** by emulating the browser. This means:
+- Making the exact same GET/POST requests as a browser
+- Does not work with auth tokens
+- Requires Facebook account credentials (email/password) or AppState
 
-If you just want to use @dongdev/fca-unofficial, you should use this command:
+## 📦 Installation
 
 ```bash
 npm install @dongdev/fca-unofficial@latest
 ```
 
-It will download @dongdev/fca-unofficial from NPM repositories
+## 🚀 Basic Usage
 
-## Example Usage
+### 1. Login and Simple Echo Bot
 
 ```javascript
 const login = require("@dongdev/fca-unofficial");
 
 login({ appState: [] }, (err, api) => {
-  if (err) return console.error(err);
-
-  api.listenMqtt((err, event) => {
     if (err) return console.error(err);
 
-    api.sendMessage(event.body, event.threadID);
-  });
+    api.listenMqtt((err, event) => {
+        if (err) return console.error(err);
+
+        // Echo back the received message
+        api.sendMessage(event.body, event.threadID);
+    });
 });
 ```
 
-Result:
+### 2. Send Text Message
 
-<img width="517" alt="screen shot 2016-11-04 at 14 36 00" src="https://cloud.githubusercontent.com/assets/4534692/20023545/f8c24130-a29d-11e6-9ef7-47568bdbc1f2.png">
-
-## Main Functionality
-
-### Sending a message
-
-#### api.sendMessage(message, threadID[, callback][, messageid])
-
-Various types of message can be sent:
-
-- _Regular:_ set field `body` to the desired message as a string.
-- _Sticker:_ set a field `sticker` to the desired sticker ID.
-- _File or image:_ Set field `attachment` to a readable stream or an array of readable streams.
-- _URL:_ set a field `url` to the desired URL.
-- _Emoji:_ set field `emoji` to the desired emoji as a string and set field `emojiSize` with size of the emoji (`small`, `medium`, `large`)
-
-Note that a message can only be a regular message (which can be empty) and optionally one of the following: a sticker, an attachment or a url.
-
-**Tip**: to find your own ID, you can look inside the cookies. The `userID` is under the name `c_user`.
-
-**Example (Basic Message)**
-
-```js
+```javascript
 const login = require("@dongdev/fca-unofficial");
 
 login({ appState: [] }, (err, api) => {
-  if (err) {
-    console.error("Login Error:", err);
-    return;
-  }
+    if (err) {
+        console.error("Login Error:", err);
+        return;
+    }
 
-  let yourID = "000000000000000"; // Replace with actual Facebook ID
-  let msg = "Hey!";
+    let yourID = "000000000000000"; // Replace with actual Facebook ID
+    let msg = "Hey!";
 
-  api.sendMessage(msg, yourID, err => {
-    if (err) console.error("Message Sending Error:", err);
-    else console.log("Message sent successfully!");
-  });
+    api.sendMessage(msg, yourID, err => {
+        if (err) console.error("Message Sending Error:", err);
+        else console.log("Message sent successfully!");
+    });
 });
 ```
 
-**Example (File upload)**
+**Tip:** To find your Facebook ID, look inside the cookies under the name `c_user`
 
-```js
+### 3. Send File/Image
+
+```javascript
 const login = require("@dongdev/fca-unofficial");
-const fs = require("fs"); // ✅ Required the fs module
+const fs = require("fs");
 
 login({ appState: [] }, (err, api) => {
-  if (err) {
-    console.error("Login Error:", err);
-    return;
-  }
+    if (err) {
+        console.error("Login Error:", err);
+        return;
+    }
 
-  let yourID = "000000000000000"; // Replace with actual Facebook ID
-  let imagePath = __dirname + "/image.jpg";
+    let yourID = "000000000000000";
+    let imagePath = __dirname + "/image.jpg";
 
-  // Check if the file exists before sending
-  if (!fs.existsSync(imagePath)) {
-    console.error("Error: Image file not found!");
-    return;
-  }
+    // Check if file exists
+    if (!fs.existsSync(imagePath)) {
+        console.error("Error: Image file not found!");
+        return;
+    }
 
-  let msg = {
-    body: "Hey!",
-    attachment: fs.createReadStream(imagePath)
-  };
+    let msg = {
+        body: "Hey!",
+        attachment: fs.createReadStream(imagePath)
+    };
 
-  api.sendMessage(msg, yourID, err => {
-    if (err) console.error("Message Sending Error:", err);
-    else console.log("Message sent successfully!");
-  });
+    api.sendMessage(msg, yourID, err => {
+        if (err) console.error("Message Sending Error:", err);
+        else console.log("Message sent successfully!");
+    });
 });
 ```
 
----
+## 📝 Message Types
 
-### Saving session.
+| Type             | Usage                                                           |
+| ---------------- | --------------------------------------------------------------- |
+| **Regular text** | `{ body: "message text" }`                                      |
+| **Sticker**      | `{ sticker: "sticker_id" }`                                     |
+| **File/Image**   | `{ attachment: fs.createReadStream(path) }` or array of streams |
+| **URL**          | `{ url: "https://example.com" }`                                |
+| **Large emoji**  | `{ emoji: "👍", emojiSize: "large" }` (small/medium/large)       |
 
-To avoid logging in every time you should save AppState (cookies etc.) to a file, then you can use it without having password in your scripts.
+**Note:** A message can only be a regular message (which can be empty) and optionally **one of the following**: a sticker, an attachment, or a URL.
 
-**Example**
+## 💾 Saving AppState to Avoid Re-login
 
-```js
+### Save AppState
+
+```javascript
 const fs = require("fs");
 const login = require("@dongdev/fca-unofficial");
 
 const credentials = { appState: [] };
 
 login(credentials, (err, api) => {
-  if (err) {
-    console.error("Login Error:", err);
-    return;
-  }
+    if (err) {
+        console.error("Login Error:", err);
+        return;
+    }
 
-  try {
-    const appState = JSON.stringify(api.getAppState(), null, 2); // Pretty print for readability
-    fs.writeFileSync("appstate.json", appState);
-    console.log("✅ AppState saved successfully!");
-  } catch (error) {
-    console.error("Error saving AppState:", error);
-  }
+    try {
+        const appState = JSON.stringify(api.getAppState(), null, 2);
+        fs.writeFileSync("appstate.json", appState);
+        console.log("✅ AppState saved successfully!");
+    } catch (error) {
+        console.error("Error saving AppState:", error);
+    }
 });
 ```
 
-Alternative: Use [c3c-fbstate](https://github.com/c3cbot/c3c-fbstate) to get fbstate.json (appstate.json)
+### Use Saved AppState
 
----
-
-### Listening to a chat
-
-#### api.listenMqtt(callback)
-
-Listen watches for messages sent in a chat. By default this won't receive events (joining/leaving a chat, title change etc…) but it can be activated with `api.setOptions({listenEvents: true})`. This will by default ignore messages sent by the current account, you can enable listening to your own messages with `api.setOptions({selfListen: true})`.
-
-**Example**
-
-```js
+```javascript
 const fs = require("fs");
 const login = require("@dongdev/fca-unofficial");
 
-// Simple echo bot: Repeats everything you say. Stops when you say "/stop".
 login(
-  { appState: JSON.parse(fs.readFileSync("appstate.json", "utf8")) },
-  (err, api) => {
-    if (err) {
-      console.error("Login Error:", err);
-      return;
-    }
-
-    api.setOptions({ listenEvents: true });
-
-    const stopListening = api.listenMqtt((err, event) => {
-      if (err) {
-        console.error("Listen Error:", err);
-        return;
-      }
-
-      // Mark message as read
-      api.markAsRead(event.threadID, err => {
-        if (err) console.error("Mark as read error:", err);
-      });
-
-      // Handle different event types
-      switch (event.type) {
-        case "message":
-          if (event.body && event.body.trim().toLowerCase() === "/stop") {
-            api.sendMessage("Goodbye…", event.threadID);
-            stopListening();
+    { appState: JSON.parse(fs.readFileSync("appstate.json", "utf8")) },
+    (err, api) => {
+        if (err) {
+            console.error("Login Error:", err);
             return;
-          }
-          api.sendMessage(`TEST BOT: ${event.body}`, event.threadID);
-          break;
+        }
 
-        case "event":
-          console.log("Event Received:", event);
-          break;
-      }
-    });
-  }
+        console.log("✅ Logged in successfully!");
+        // Your code here
+    }
 );
 ```
 
-`<a name="projects-using-this-api"></a>`
+**Alternative:** Use [c3c-fbstate](https://github.com/c3cbot/c3c-fbstate) to get fbstate.json
 
-## Projects using this API:
+## 👂 Listening for Messages
 
-- [c3c](https://github.com/lequanglam/c3c) - A bot that can be customizable using plugins. Support Facebook & Discord.
-- [Miraiv2](https://github.com/miraiPr0ject/miraiv2) - A simple Facebook Messenger Bot made by CatalizCS and SpermLord.
+### Echo Bot with Stop Command
 
-## Projects using this API (original repository, facebook-chat-api):
+```javascript
+const fs = require("fs");
+const login = require("@dongdev/fca-unofficial");
 
-- [Messer](https://github.com/mjkaufer/Messer) - Command-line messaging for Facebook Messenger
-- [messen](https://github.com/tomquirk/messen) - Rapidly build Facebook Messenger apps in Node.js
-- [Concierge](https://github.com/concierge/Concierge) - Concierge is a highly modular, easily extensible general purpose chat bot with a built in package manager
-- [Marc Zuckerbot](https://github.com/bsansouci/marc-zuckerbot) - Facebook chat bot
-- [Marc Thuckerbot](https://github.com/bsansouci/lisp-bot) - Programmable lisp bot
-- [MarkovsInequality](https://github.com/logicx24/MarkovsInequality) - Extensible chat bot adding useful functions to Facebook Messenger
-- [AllanBot](https://github.com/AllanWang/AllanBot-Public) - Extensive module that combines the facebook api with firebase to create numerous functions; no coding experience is required to implement this.
-- [Larry Pudding Dog Bot](https://github.com/Larry850806/facebook-chat-bot) - A facebook bot you can easily customize the response
-- [fbash](https://github.com/avikj/fbash) - Run commands on your computer's terminal over Facebook Messenger
-- [Klink](https://github.com/KeNt178/klink) - This Chrome extension will 1-click share the link of your active tab over Facebook Messenger
-- [Botyo](https://github.com/ivkos/botyo) - Modular bot designed for group chat rooms on Facebook
-- [matrix-puppet-facebook](https://github.com/matrix-hacks/matrix-puppet-facebook) - A facebook bridge for [matrix](https://matrix.org)
-- [facebot](https://github.com/Weetbix/facebot) - A facebook bridge for Slack.
-- [Botium](https://github.com/codeforequity-at/botium-core) - The Selenium for Chatbots
-- [Messenger-CLI](https://github.com/AstroCB/Messenger-CLI) - A command-line interface for sending and receiving messages through Facebook Messenger.
-- [AssumeZero-Bot](https://github.com/AstroCB/AssumeZero-Bot) – A highly customizable Facebook Messenger bot for group chats.
-- [Miscord](https://github.com/Bjornskjald/miscord) - An easy-to-use Facebook bridge for Discord.
-- [chat-bridge](https://github.com/rexx0520/chat-bridge) - A Messenger, Telegram and IRC chat bridge.
-- [messenger-auto-reply](https://gitlab.com/theSander/messenger-auto-reply) - An auto-reply service for Messenger.
-- [BotCore](https://github.com/AstroCB/BotCore) – A collection of tools for writing and managing Facebook Messenger bots.
-- [mnotify](https://github.com/AstroCB/mnotify) – A command-line utility for sending alerts and notifications through Facebook Messenger.
+login(
+    { appState: JSON.parse(fs.readFileSync("appstate.json", "utf8")) },
+    (err, api) => {
+        if (err) {
+            console.error("Login Error:", err);
+            return;
+        }
+
+        // Enable listening to events (join/leave, title change, etc.)
+        api.setOptions({ listenEvents: true });
+
+        const stopListening = api.listenMqtt((err, event) => {
+            if (err) {
+                console.error("Listen Error:", err);
+                return;
+            }
+
+            // Mark as read
+            api.markAsRead(event.threadID, err => {
+                if (err) console.error("Mark as read error:", err);
+            });
+
+            // Handle different event types
+            switch (event.type) {
+                case "message":
+                    if (event.body && event.body.trim().toLowerCase() === "/stop") {
+                        api.sendMessage("Goodbye…", event.threadID);
+                        stopListening();
+                        return;
+                    }
+                    api.sendMessage(`TEST BOT: ${event.body}`, event.threadID);
+                    break;
+
+                case "event":
+                    console.log("Event Received:", event);
+                    break;
+            }
+        });
+    }
+);
+```
+
+### Listen Options
+
+```javascript
+api.setOptions({
+    listenEvents: true,  // Receive events (join/leave, rename, etc.)
+    selfListen: true,    // Receive messages from yourself
+    logLevel: "silent"   // Disable logs (silent/error/warn/info/verbose)
+});
+```
+
+**By default:**
+- `listenEvents` is `false` - won't receive events like joining/leaving chat, title changes
+- `selfListen` is `false` - will ignore messages sent by the current account
+
+## 🛠️ Projects Using This API
+
+- **[c3c](https://github.com/lequanglam/c3c)** - Customizable bot with plugins, supports Facebook & Discord
+- **[Miraiv2](https://github.com/miraiPr0ject/miraiv2)** - Simple Facebook Messenger Bot
+- **[Messer](https://github.com/mjkaufer/Messer)** - Command-line messaging for Facebook Messenger
+- **[messen](https://github.com/tomquirk/messen)** - Rapidly build Facebook Messenger apps in Node.js
+- **[Concierge](https://github.com/concierge/Concierge)** - Highly modular chat bot with built-in package manager
+- **[Marc Zuckerbot](https://github.com/bsansouci/marc-zuckerbot)** - Facebook chat bot
+- **[Botyo](https://github.com/ivkos/botyo)** - Modular bot for group chat rooms
+- **[matrix-puppet-facebook](https://github.com/matrix-hacks/matrix-puppet-facebook)** - Facebook bridge for Matrix
+- **[Miscord](https://github.com/Bjornskjald/miscord)** - Easy-to-use Facebook bridge for Discord
+- **[chat-bridge](https://github.com/rexx0520/chat-bridge)** - Messenger, Telegram and IRC chat bridge
+- **[Botium](https://github.com/codeforequity-at/botium-core)** - The Selenium for Chatbots
+- **[Messenger-CLI](https://github.com/AstroCB/Messenger-CLI)** - Command-line interface for Facebook Messenger
+- **[BotCore](https://github.com/AstroCB/BotCore)** - Tools for writing and managing Facebook Messenger bots
+
+[See more projects...](https://github.com/Donix-VN/fca-unofficial#projects-using-this-api)
+
+## 📚 Full API Documentation
+
+See [DOCS.md](./DOCS.md) for detailed information about:
+- All available API methods
+- Parameters and options
+- Event types
+- Error handling
+- Advanced usage examples
+
+## 🎯 Quick Reference
+
+### Common API Methods
+
+```javascript
+// Send message
+api.sendMessage(message, threadID, callback);
+
+// Send typing indicator
+api.sendTypingIndicator(threadID, callback);
+
+// Mark as read
+api.markAsRead(threadID, callback);
+
+// Get user info
+api.getUserInfo(userID, callback);
+
+// Get thread info
+api.getThreadInfo(threadID, callback);
+
+// Change thread color
+api.changeThreadColor(color, threadID, callback);
+
+// Change thread emoji
+api.changeThreadEmoji(emoji, threadID, callback);
+
+// Set message reaction
+api.setMessageReaction(reaction, messageID, callback);
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a new branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+MIT License - See [LICENSE](./LICENSE) for details.
+
+## 👨‍💻 Author
+
+**DongDev** - [Facebook](https://www.facebook.com/mdong.dev)
+
+## ⭐ Support
+
+If this project is helpful, please give it a ⭐ on GitHub!
+
+## 🔗 Links
+
+- [NPM Package](https://www.npmjs.com/package/@dongdev/fca-unofficial)
+- [GitHub Repository](https://github.com/Donix-VN/fca-unofficial)
+- [Issue Tracker](https://github.com/Donix-VN/fca-unofficial/issues)
+
+---
+
+**Disclaimer:** This is an unofficial API and is not officially supported by Facebook. Use responsibly and comply with [Facebook Terms of Service](https://www.facebook.com/terms.php).
