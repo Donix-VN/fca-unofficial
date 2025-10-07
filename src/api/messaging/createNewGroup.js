@@ -1,16 +1,16 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function createNewGroup(participantIDs, groupTitle, callback) {
-    if (utils.getType(groupTitle) == "Function") {
+    if (getType(groupTitle) == "Function") {
       callback = groupTitle;
       groupTitle = null;
     }
 
-    if (utils.getType(participantIDs) !== "Array") {
+    if (getType(participantIDs) !== "Array") {
       throw { error: "createNewGroup: participantIDs should be an array." };
     }
 
@@ -67,7 +67,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     defaultFuncs
       .post("https://www.facebook.com/api/graphql/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.errors) {
           throw resData;

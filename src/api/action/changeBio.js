@@ -1,8 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function changeBio(bio, publish, callback) {
     let resolveFunc = function() {};
@@ -14,8 +14,8 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     if (!callback) {
       if (
-        utils.getType(publish) == "Function" ||
-        utils.getType(publish) == "AsyncFunction"
+        getType(publish) == "Function" ||
+        getType(publish) == "AsyncFunction"
       ) {
         callback = publish;
       } else {
@@ -28,11 +28,11 @@ module.exports = function(defaultFuncs, api, ctx) {
       }
     }
 
-    if (utils.getType(publish) != "Boolean") {
+    if (getType(publish) != "Boolean") {
       publish = false;
     }
 
-    if (utils.getType(bio) != "String") {
+    if (getType(bio) != "String") {
       bio = "";
       publish = false;
     }
@@ -40,7 +40,6 @@ module.exports = function(defaultFuncs, api, ctx) {
     const form = {
       fb_api_caller_class: "RelayModern",
       fb_api_req_friendly_name: "ProfileCometSetBioMutation",
-      // This doc_is is valid as of May 23, 2020
       doc_id: "2725043627607610",
       variables: JSON.stringify({
         input: {
@@ -58,7 +57,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     defaultFuncs
       .post("https://www.facebook.com/api/graphql/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.errors) {
           throw resData;

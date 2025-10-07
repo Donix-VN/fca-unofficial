@@ -1,11 +1,11 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function handleFriendRequest(userID, accept, callback) {
-    if (utils.getType(accept) !== "Boolean") {
+    if (getType(accept) !== "Boolean") {
       throw {
         error: "Please pass a boolean as a second argument."
       };
@@ -28,7 +28,7 @@ module.exports = function(defaultFuncs, api, ctx) {
     }
 
     const form = {
-      viewer_id: ctx.i_userID || ctx.userID,
+      viewer_id: ctx.userID,
       "frefs[0]": "jwl",
       floc: "friend_center_requests",
       ref: "/reqs.php",
@@ -37,7 +37,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     defaultFuncs
       .post("https://www.facebook.com/requests/friends/ajax/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.payload.err) {
           throw {

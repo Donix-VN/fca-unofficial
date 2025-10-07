@@ -1,59 +1,70 @@
 "use strict";
 
-const utils = require("../../utils");
+const { generateOfflineThreadingID } = require("../../utils/format.js");
 const log = require("npmlog");
 
-module.exports = function(defaultFuncs, api, ctx) {
+module.exports = function (defaultFuncs, api, ctx) {
   return function changeNickname(nickname, threadID, participantID, callback) {
-    let resolveFunc = function() {};
-    let rejectFunc = function() {};
-    const returnPromise = new Promise(function(resolve, reject) {
-      resolveFunc = resolve;
-      rejectFunc = reject;
-    });
-    if (!callback) {
-      callback = function(err) {
-        if (err) {
-          return rejectFunc(err);
-        }
-        resolveFunc();
+    return new Promise((resolve, reject) => {
+      if (!ctx.mqttClient) {
+        const err = new Error("Not connected to MQTT");
+        callback?.(err);
+        return reject(err);
+      }
+      if (!threadID || !participantID) {
+        const err = new Error("Missing required parameters");
+        callback?.(err);
+        return reject(err);
+      }
+      const reqID = ++ctx.wsReqNumber;
+      const taskID = ++ctx.wsTaskNumber;
+      const payload = {
+        epoch_id: generateOfflineThreadingID(),
+        tasks: [
+          {
+            failure_count: null,
+            label: "44",
+            payload: JSON.stringify({
+              thread_key: threadID,
+              contact_id: participantID,
+              nickname: nickname || "",
+              sync_group: 1
+            }),
+            queue_name: "thread_participant_nickname",
+            task_id: taskID
+          }
+        ],
+        version_id: "8798795233522156"
       };
-    }
-
-    const form = {
-      nickname: nickname,
-      participant_id: participantID,
-      thread_or_other_fbid: threadID
-    };
-
-    defaultFuncs
-      .post(
-        "https://www.facebook.com/messaging/save_thread_nickname/?source=thread_settings&dpr=1",
-        ctx.jar,
-        form
-      )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-      .then(function(resData) {
-        if (resData.error === 1545014) {
-          throw { error: "Trying to change nickname of user isn't in thread" };
+      const request = {
+        app_id: "2220391788200892",
+        payload: JSON.stringify(payload),
+        request_id: reqID,
+        type: 3
+      };
+      const onResponse = (topic, message) => {
+        if (topic !== "/ls_resp") return;
+        let jsonMsg;
+        try {
+          jsonMsg = JSON.parse(message.toString());
+          jsonMsg.payload = JSON.parse(jsonMsg.payload);
+        } catch (err) {
+          return;
         }
-        if (resData.error === 1357031) {
-          throw {
-            error:
-              "Trying to change user nickname of a thread that doesn't exist. Have at least one message in the thread before trying to change the user nickname."
-          };
+        if (jsonMsg.request_id !== reqID) return;
+        ctx.mqttClient.removeListener("message", onResponse);
+        callback?.(null, { success: true, response: jsonMsg.payload });
+        return resolve({ success: true, response: jsonMsg.payload });
+      };
+      ctx.mqttClient.on("message", onResponse);
+      ctx.mqttClient.publish("/ls_req", JSON.stringify(request), { qos: 1, retain: false }, (err) => {
+        if (err) {
+          ctx.mqttClient.removeListener("message", onResponse);
+          log.error("changeNicknameMqtt", err);
+          callback?.(err);
+          return reject(err);
         }
-        if (resData.error) {
-          throw resData;
-        }
-
-        return callback();
-      })
-      .catch(function(err) {
-        log.error("changeNickname", err);
-        return callback(err);
       });
-
-    return returnPromise;
+    });
   };
 };

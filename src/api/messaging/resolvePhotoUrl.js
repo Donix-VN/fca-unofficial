@@ -1,7 +1,6 @@
 "use strict";
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin, saveCookies } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function resolvePhotoUrl(photoID, callback) {
     let resolveFunc = function() {};
@@ -24,7 +23,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       .get("https://www.facebook.com/mercury/attachments/photo", ctx.jar, {
         photo_id: photoID
       })
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(resData => {
         if (resData.error) {
           throw resData;

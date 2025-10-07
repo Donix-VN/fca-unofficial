@@ -1,7 +1,9 @@
-const utils = require("../../utils");
+
 var log = require("npmlog");
 var bluebird = require("bluebird");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
+const { isReadableStream } = require("../../utils/constants");
 module.exports = function(defaultFuncs, api, ctx) {
   function uploadAttachment(attachments, callback) {
     callback = callback || function() {};
@@ -9,11 +11,11 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     // create an array of promises
     for (var i = 0; i < attachments.length; i++) {
-      if (!utils.isReadableStream(attachments[i])) {
+      if (!isReadableStream(attachments[i])) {
         throw {
           error:
             "Attachment should be a readable stream and not " +
-            utils.getType(attachments[i]) +
+            getType(attachments[i]) +
             "."
         };
       }
@@ -31,7 +33,7 @@ module.exports = function(defaultFuncs, api, ctx) {
             form,
             {}
           )
-          .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+          .then(parseAndCheckLogin(ctx, defaultFuncs))
           .then(function(resData) {
             if (resData.error) {
               throw resData;
@@ -105,7 +107,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       form.payload.tasks[0].payload.attachment_fbids = [];
       if (form.payload.tasks[0].payload.text == "")
         form.payload.tasks[0].payload.text = null;
-      if (utils.getType(msg.attachment) !== "Array") {
+      if (getType(msg.attachment) !== "Array") {
         msg.attachment = [msg.attachment];
       }
 
@@ -228,12 +230,12 @@ module.exports = function(defaultFuncs, api, ctx) {
   return function sendMessageMqtt(msg, threadID, callback, replyToMessage) {
     if (
       !callback &&
-      (utils.getType(threadID) === "Function" ||
-        utils.getType(threadID) === "AsyncFunction")
+      (getType(threadID) === "Function" ||
+        getType(threadID) === "AsyncFunction")
     ) {
       return threadID({ error: "Pass a threadID as a second argument." });
     }
-    if (!replyToMessage && utils.getType(callback) === "String") {
+    if (!replyToMessage && getType(callback) === "String") {
       replyToMessage = callback;
       callback = function() {};
     }
@@ -242,9 +244,9 @@ module.exports = function(defaultFuncs, api, ctx) {
       callback = function(err, friendList) {};
     }
 
-    var msgType = utils.getType(msg);
-    var threadIDType = utils.getType(threadID);
-    var messageIDType = utils.getType(replyToMessage);
+    var msgType = getType(msg);
+    var threadIDType = getType(threadID);
+    var messageIDType = getType(replyToMessage);
 
     if (msgType !== "String" && msgType !== "Object") {
       return callback({

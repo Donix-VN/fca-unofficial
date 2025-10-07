@@ -547,7 +547,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
             console.error("Database connection failed:", error && error.message ? error.message : String(error));
           });
 
-        logger("FCA fix/update by DongDev", "info");
+        logger("FCA fix/update by DongDev (Donix-VN)", "info");
 
         const ctx = {
           userID,
@@ -606,7 +606,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
           });
         });
 
-        logger(`Loaded ${loaded} FCA API methods${skipped ? `, skipped ${skipped} duplicates` : ""}`, "[ FCA-UNO ] >");
+        logger(`Loaded ${loaded} FCA API methods${skipped ? `, skipped ${skipped} duplicates` : ""}`);
 
         api.listen = api.listenMqtt;
 

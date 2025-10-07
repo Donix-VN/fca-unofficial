@@ -1,13 +1,13 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin, saveCookies } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return async function markAsRead(threadID, read, callback) {
     if (
-      utils.getType(read) === "Function" ||
-      utils.getType(read) === "AsyncFunction"
+      getType(read) === "Function" ||
+      getType(read) === "AsyncFunction"
     ) {
       callback = read;
       read = true;
@@ -39,8 +39,8 @@ module.exports = function(defaultFuncs, api, ctx) {
             ctx.jar,
             form
           )
-          .then(utils.saveCookies(ctx.jar))
-          .then(utils.parseAndCheckLogin(ctx, defaultFuncs));
+          .then(saveCookies(ctx.jar))
+          .then(parseAndCheckLogin(ctx, defaultFuncs));
       } catch (e) {
         callback(e);
         return e;
@@ -49,7 +49,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       if (resData.error) {
         const err = resData.error;
         log.error("markAsRead", err);
-        if (utils.getType(err) == "Object" && err.error === "Not logged in.") {
+        if (getType(err) == "Object" && err.error === "Not logged in.") {
           ctx.loggedIn = false;
         }
         callback(err);

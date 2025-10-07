@@ -1,11 +1,10 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { formatID } = require("../../utils/format");
 function formatData(data) {
   return {
-    userID: utils.formatID(data.uid.toString()),
+    userID: formatID(data.uid.toString()),
     photoUrl: data.photo,
     indexRank: data.index_rank,
     name: data.text,
@@ -37,16 +36,16 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     const form = {
       value: name.toLowerCase(),
-      viewer: ctx.i_userID || ctx.userID,
+      viewer: ctx.userID,
       rsp: "search",
       context: "search",
       path: "/home.php",
-      request_id: utils.getGUID()
+      request_id: ctx.clientId
     };
 
     defaultFuncs
       .get("https://www.facebook.com/ajax/typeahead/search.php", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

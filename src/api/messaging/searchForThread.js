@@ -1,7 +1,6 @@
 "use strict";
 
-const utils = require("../../utils");
-
+const { parseAndCheckLogin } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function searchForThread(name, callback) {
     let resolveFunc = function() {};
@@ -34,7 +33,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         tmpForm
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

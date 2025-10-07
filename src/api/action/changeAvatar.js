@@ -1,16 +1,17 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { isReadableStream } = require("../../utils/constants");
+const { parseAndCheckLogin } = require("../../utils/client");
+const { formatID, getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   function handleUpload(image, callback) {
     const uploads = [];
 
     const form = {
-      profile_id: ctx.i_userID || ctx.userID,
+      profile_id: ctx.userID,
       photo_source: 57,
-      av: ctx.i_userID || ctx.userID,
+      av: ctx.userID,
       file: image
     };
 
@@ -22,7 +23,7 @@ module.exports = function(defaultFuncs, api, ctx) {
           form,
           {}
         )
-        .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+        .then(parseAndCheckLogin(ctx, defaultFuncs))
         .then(function(resData) {
           if (resData.error) {
             throw resData;
@@ -55,7 +56,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       rejectFunc = reject;
     });
 
-    if (!timestamp && utils.getType(caption) === "Number") {
+    if (!timestamp && getType(caption) === "Number") {
       timestamp = caption;
       caption = "";
     }
@@ -63,8 +64,8 @@ module.exports = function(defaultFuncs, api, ctx) {
     if (
       !timestamp &&
       !callback &&
-      (utils.getType(caption) == "Function" ||
-        utils.getType(caption) == "AsyncFunction")
+      (getType(caption) == "Function" ||
+        getType(caption) == "AsyncFunction")
     ) {
       callback = caption;
       caption = "";
@@ -79,7 +80,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         resolveFunc(data);
       };
 
-    if (!utils.isReadableStream(image))
+    if (!isReadableStream(image))
       return callback("Image is not a readable stream");
 
     handleUpload(image, function(err, payload) {
@@ -118,7 +119,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
       defaultFuncs
         .post("https://www.facebook.com/api/graphql/", ctx.jar, form)
-        .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+        .then(parseAndCheckLogin(ctx, defaultFuncs))
         .then(function(resData) {
           if (resData.errors) {
             throw resData;

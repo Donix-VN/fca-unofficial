@@ -33,9 +33,6 @@ module.exports = function(_defaultFuncs, _api, _ctx) {
     MediumSlateBlue: "234137870477637", //BrightPurple
     DeepSkyBlue: "2442142322678320", //AquaBlue
     BrilliantRose: "169463077092846", //HotPink
-    //i've tried my best, everything else can't be mapped. (or is it?) -UIRI 2020
-    //#endregion
-
     DefaultBlue: "196241301102133",
     HotPink: "169463077092846",
     AquaBlue: "2442142322678320",

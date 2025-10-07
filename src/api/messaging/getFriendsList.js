@@ -1,9 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
+const { formatID } = require("../../utils/format");
 const log = require("npmlog");
-
-// [almost] copy pasted from one of FB's minified file (GenderConst)
+const { parseAndCheckLogin } = require("../../utils/client");
 const GENDERS = {
   0: "unknown",
   1: "female_singular",
@@ -26,7 +25,7 @@ function formatData(obj) {
       alternateName: user.alternateName,
       firstName: user.firstName,
       gender: GENDERS[user.gender],
-      userID: utils.formatID(user.id.toString()),
+      userID: formatID(user.id.toString()),
       isFriend: user.is_friend != null && user.is_friend ? true : false,
       fullName: user.name,
       profilePicture: user.thumbSrc,
@@ -61,9 +60,9 @@ module.exports = function(defaultFuncs, api, ctx) {
         "https://www.facebook.com/chat/user_info_all",
         ctx.jar,
         {},
-        { viewer: ctx.i_userID || ctx.userID }
+        { viewer: ctx.userID }
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (!resData) {
           throw { error: "getFriendsList returned empty object." };

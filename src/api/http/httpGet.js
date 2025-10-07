@@ -1,8 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { get } = require("../../utils/request");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function httpGet(url, form, customHeader, callback, notAPI) {
     let resolveFunc = function() {};
@@ -14,16 +14,16 @@ module.exports = function(defaultFuncs, api, ctx) {
     });
 
     if (
-      utils.getType(form) == "Function" ||
-      utils.getType(form) == "AsyncFunction"
+      getType(form) == "Function" ||
+      getType(form) == "AsyncFunction"
     ) {
       callback = form;
       form = {};
     }
 
     if (
-      utils.getType(customHeader) == "Function" ||
-      utils.getType(customHeader) == "AsyncFunction"
+      getType(customHeader) == "Function" ||
+      getType(customHeader) == "AsyncFunction"
     ) {
       callback = customHeader;
       customHeader = {};
@@ -39,8 +39,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       };
 
     if (notAPI) {
-      utils
-        .get(url, ctx.jar, form, ctx.globalOptions, ctx, customHeader)
+      get(url, ctx.jar, form, ctx.globalOptions, ctx, customHeader)
         .then(function(resData) {
           callback(null, resData.data.toString());
         })

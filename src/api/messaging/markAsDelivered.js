@@ -1,7 +1,7 @@
 "use strict";
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin, saveCookies } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function markAsDelivered(threadID, messageID, callback) {
     let resolveFunc = function() {};
@@ -35,8 +35,8 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.saveCookies(ctx.jar))
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(saveCookies(ctx.jar))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;
@@ -46,7 +46,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       })
       .catch(function(err) {
         log.error("markAsDelivered", err);
-        if (utils.getType(err) == "Object" && err.error === "Not logged in.") {
+        if (getType(err) == "Object" && err.error === "Not logged in.") {
           ctx.loggedIn = false;
         }
         return callback(err);

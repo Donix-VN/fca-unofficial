@@ -15,7 +15,6 @@ module.exports = function (defaultFuncs, api, ctx) {
         return reject(err);
       }
       if (getType(userID) !== "Array") userID = [userID];
-
       const reqID = ++ctx.wsReqNumber;
       const taskID = ++ctx.wsTaskNumber;
 

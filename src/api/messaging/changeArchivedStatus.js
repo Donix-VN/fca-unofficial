@@ -1,8 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { formatID } = require("../../utils/format");
+const { parseAndCheckLogin } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function changeArchivedStatus(threadOrThreads, archive, callback) {
     let resolveFunc = function() {};
@@ -23,12 +23,12 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     const form = {};
 
-    if (utils.getType(threadOrThreads) === "Array") {
+    if (Array.isArray(threadOrThreads)) {
       for (let i = 0; i < threadOrThreads.length; i++) {
-        form["ids[" + threadOrThreads[i] + "]"] = archive;
+        form["ids[" + formatID(threadOrThreads[i]) + "]"] = archive;
       }
     } else {
-      form["ids[" + threadOrThreads + "]"] = archive;
+      form["ids[" + formatID(threadOrThreads) + "]"] = archive;
     }
 
     defaultFuncs
@@ -37,7 +37,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

@@ -1,8 +1,7 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function unfriend(userID, callback) {
     let resolveFunc = function() {};
@@ -27,7 +26,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       floc: "friends_tab",
       "nctr[_mod]":
         "pagelet_timeline_app_collection_" +
-        (ctx.i_userID || ctx.userID) +
+        ctx.userID +
         ":2356318349:2"
     };
 
@@ -37,7 +36,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

@@ -1,8 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
 var log = require("npmlog");
-
+const { getType } = require("../../utils/format");
+const { parseAndCheckLogin } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function postFormData(url, form, callback) {
     var resolveFunc = function() {};
@@ -15,8 +15,8 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     if (
       !callback &&
-      (utils.getType(form) == "Function" ||
-        utils.getType(form) == "AsyncFunction")
+      (getType(form) == "Function" ||
+        getType(form) == "AsyncFunction")
     ) {
       callback = form;
       form = {};
@@ -33,8 +33,9 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     defaultFuncs
       .postFormData(url, ctx.jar, form, {})
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
-        callback(null, resData.data.toString());
+        callback(null, resData);
       })
       .catch(function(err) {
         log.error("postFormData", err);

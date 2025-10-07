@@ -50,3 +50,6 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 - Added autoUpdate feature.
 ## v2.0.6-beta - 2025-10-06
 - Hotfix / auto bump
+
+## v2.0.7 - 2025-10-06
+- Hotfix / auto bump

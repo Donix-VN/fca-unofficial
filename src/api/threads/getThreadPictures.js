@@ -1,8 +1,7 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function getThreadPictures(threadID, offset, limit, callback) {
     let resolveFunc = function() {};
@@ -33,7 +32,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;
@@ -50,7 +49,7 @@ module.exports = function(defaultFuncs, api, ctx) {
                 ctx.jar,
                 form
               )
-              .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+              .then(parseAndCheckLogin(ctx, defaultFuncs))
               .then(function(resData) {
                 if (resData.error) {
                   throw resData;

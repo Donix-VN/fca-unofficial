@@ -23,34 +23,34 @@ function getInstalledVersion() {
 
 async function checkAndUpdateVersion(callback) {
   try {
-    logger("Đang kiểm tra phiên bản...", "info");
+    logger("Checking version...", "info");
     const latest = (await execPromise(`npm view ${pkgName} version`)).stdout.trim();
     const installed = getInstalledVersion();
     if (!installed || installed !== latest) {
-      logger(`Đã có bản mới (${latest}) Phiên bản đang dùng (${installed || "chưa cài"}). Đang cập nhật...`, "info");
+      logger(`New version available (${latest}). Current version (${installed || "not installed"}). Updating...`, "info");
       try {
         const { stderr } = await execPromise(`npm i ${pkgName}@latest`);
         if (stderr) logger(stderr, "error");
-        logger(`Đã cập nhật fca lên phiên bản mới nhất: ${latest}, khởi động lại để áp dụng.`, "info");
+        logger(`Updated fca to the latest version: ${latest}, Restart to apply`, "info");
         callback(null);
       } catch (e) {
-        logger(`Lỗi khi chạy npm install: ${e.error || e}. Đang thử tải về từ Github...`, "error");
+        logger(`Error running npm install: ${e.error || e}. Trying to install from GitHub...`, "error");
         try {
-          const { stderr } = await execPromise("npm i https://github.com/DongDev-VN/fca-unofficial");
+          const { stderr } = await execPromise("npm i https://github.com/Donix-VN/fca-unofficial");
           if (stderr) logger(stderr, "error");
-          logger(`Đã tải về từ Github thành công: ${latest}`, "info");
+          logger(`Installed from GitHub successfully: ${latest}`, "info");
           callback(null);
         } catch (gitErr) {
-          logger(`Lỗi khi tải về từ Github: ${gitErr.error || gitErr}`, "error");
+          logger(`Error installing from GitHub: ${gitErr.error || gitErr}`, "error");
           callback(gitErr.error || gitErr);
         }
       }
     } else {
-      logger("Phiên bản đang dùng đã là mới nhất.", "info");
+      logger(`You're already on the latest version - ${latest}`, "info");
       callback(null);
     }
   } catch (err) {
-    logger(`Lỗi khi kiểm tra phiên bản: ${err}`, "error");
+    logger(`Error checking version: ${err}`, "error");
     callback(err);
   }
 }

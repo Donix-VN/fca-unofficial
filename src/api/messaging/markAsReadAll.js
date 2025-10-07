@@ -1,8 +1,7 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin, saveCookies } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function markAsReadAll(callback) {
     let resolveFunc = function() {};
@@ -31,8 +30,8 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.saveCookies(ctx.jar))
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(saveCookies(ctx.jar))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

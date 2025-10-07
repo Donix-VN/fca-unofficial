@@ -1,8 +1,6 @@
 "use strict";
 
-const utils = require("../../utils");
-var log = require("npmlog");
-
+const { generateOfflineThreadingID } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function shareContact(text, senderID, threadID, callback) {
     if (!text) {
@@ -39,7 +37,7 @@ module.exports = function(defaultFuncs, api, ctx) {
             failure_count: null
           }
         ],
-        epoch_id: utils.generateOfflineThreadingID(),
+        epoch_id: generateOfflineThreadingID(),
         version_id: "7214102258676893"
       }),
       request_id: ++count_req,

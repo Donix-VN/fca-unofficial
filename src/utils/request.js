@@ -1,10 +1,9 @@
-"use strict";
-
 const axios = require("axios");
 const { CookieJar } = require("tough-cookie");
 const { wrapper } = require("axios-cookiejar-support");
 const FormData = require("form-data");
 const { HttpsProxyAgent } = require("https-proxy-agent");
+const { Readable } = require("stream");
 
 const headersMod = require("./headers");
 const getHeaders = headersMod.getHeaders || headersMod;
@@ -50,6 +49,25 @@ function cfg(base = {}) {
   };
 }
 
+function toStringVal(v) {
+  if (v === undefined || v === null) return "";
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "boolean") return v ? "true" : "false";
+  return String(v);
+}
+
+function isStream(v) {
+  return v && typeof v === "object" && typeof v.pipe === "function" && typeof v.on === "function";
+}
+
+function isBlobLike(v) {
+  return v && typeof v.arrayBuffer === "function" && (typeof v.type === "string" || typeof v.name === "string");
+}
+
+function isPairArrayList(arr) {
+  return Array.isArray(arr) && arr.length > 0 && arr.every(x => Array.isArray(x) && x.length === 2 && typeof x[0] === "string");
+}
+
 function cleanGet(url) {
   return requestWithRetry(() => client.get(url, cfg()));
 }
@@ -71,9 +89,19 @@ function post(url, reqJar, form, options, ctx, customHeader) {
     if (form && typeof form === "object") {
       for (const k of Object.keys(form)) {
         let v = form[k];
+        if (isPairArrayList(v)) {
+          for (const [kk, vv] of v) p.append(`${k}[${kk}]`, toStringVal(vv));
+          continue;
+        }
+        if (Array.isArray(v)) {
+          for (const x of v) {
+            if (Array.isArray(x) && x.length === 2 && typeof x[1] !== "object") p.append(k, toStringVal(x[1]));
+            else p.append(k, toStringVal(x));
+          }
+          continue;
+        }
         if (getType(v) === "Object") v = JSON.stringify(v);
-        if (Array.isArray(v)) v.forEach(x => p.append(k, x));
-        else p.append(k, v);
+        p.append(k, toStringVal(v));
       }
     }
     data = p.toString();
@@ -82,13 +110,53 @@ function post(url, reqJar, form, options, ctx, customHeader) {
   return requestWithRetry(() => client.post(url, data, cfg({ reqJar, headers })));
 }
 
-function postFormData(url, reqJar, form, qs, options, ctx) {
+async function postFormData(url, reqJar, form, qs, options, ctx) {
   const fd = new FormData();
   if (form && typeof form === "object") {
     for (const k of Object.keys(form)) {
       const v = form[k];
-      if (Array.isArray(v)) v.forEach(x => fd.append(k, x));
-      else fd.append(k, v);
+      if (v === undefined || v === null) continue;
+      if (isPairArrayList(v)) {
+        for (const [kk, vv] of v) fd.append(`${k}[${kk}]`, typeof vv === "object" && !Buffer.isBuffer(vv) && !isStream(vv) ? JSON.stringify(vv) : vv);
+        continue;
+      }
+      if (Array.isArray(v)) {
+        for (const x of v) {
+          if (Array.isArray(x) && x.length === 2 && x[1] && typeof x[1] === "object" && !Buffer.isBuffer(x[1]) && !isStream(x[1])) {
+            fd.append(k, x[0], x[1]);
+          } else if (Array.isArray(x) && x.length === 2 && typeof x[1] !== "object") {
+            fd.append(k, toStringVal(x[1]));
+          } else if (x && typeof x === "object" && "value" in x && "options" in x) {
+            fd.append(k, x.value, x.options || {});
+          } else if (isStream(x) || Buffer.isBuffer(x) || typeof x === "string") {
+            fd.append(k, x);
+          } else if (isBlobLike(x)) {
+            const buf = Buffer.from(await x.arrayBuffer());
+            fd.append(k, buf, { filename: x.name || k, contentType: x.type || undefined });
+          } else {
+            fd.append(k, JSON.stringify(x));
+          }
+        }
+        continue;
+      }
+      if (v && typeof v === "object" && "value" in v && "options" in v) {
+        fd.append(k, v.value, v.options || {});
+        continue;
+      }
+      if (isStream(v) || Buffer.isBuffer(v) || typeof v === "string") {
+        fd.append(k, v);
+        continue;
+      }
+      if (isBlobLike(v)) {
+        const buf = Buffer.from(await v.arrayBuffer());
+        fd.append(k, buf, { filename: v.name || k, contentType: v.type || undefined });
+        continue;
+      }
+      if (typeof v === "number" || typeof v === "boolean") {
+        fd.append(k, toStringVal(v));
+        continue;
+      }
+      fd.append(k, JSON.stringify(v));
     }
   }
   const headers = { ...getHeaders(url, options, ctx), ...fd.getHeaders() };

@@ -1,8 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { getFrom } = require("../../utils/constants");
+const { get } = require("../../utils/request")
 module.exports = function(defaultFuncs, api, ctx) {
   return function refreshFb_dtsg(obj, callback) {
     let resolveFunc, rejectFunc;
@@ -11,15 +11,15 @@ module.exports = function(defaultFuncs, api, ctx) {
       rejectFunc = reject;
     });
     if (
-      utils.getType(obj) === "Function" ||
-      utils.getType(obj) === "AsyncFunction"
+      getType(obj) === "Function" ||
+      getType(obj) === "AsyncFunction"
     ) {
       callback = obj;
       obj = {};
     }
     if (!obj) obj = {};
-    if (utils.getType(obj) !== "Object") {
-      throw new utils.CustomError(
+    if (getType(obj) !== "Object") {
+      throw Error(
         "The first parameter must be an object or a callback function"
       );
     }
@@ -27,19 +27,24 @@ module.exports = function(defaultFuncs, api, ctx) {
       callback = (err, data) => (err ? rejectFunc(err) : resolveFunc(data));
     }
     if (Object.keys(obj).length === 0) {
-      utils
-        .get("https://www.facebook.com/", ctx.jar, null, ctx.globalOptions, {
+      get(
+        "https://www.facebook.com/",
+        ctx.jar,
+        null,
+        ctx.globalOptions,
+        {
           noRef: true
-        })
+        }
+      )
         .then(resData => {
-          const fb_dtsg = utils.getFrom(
+          const fb_dtsg = getFrom(
             resData.body,
             '["DTSGInitData",[],{"token":"',
             '","'
           );
-          const jazoest = utils.getFrom(resData.body, "jazoest=", '",');
+          const jazoest = getFrom(resData.body, "jazoest=", '",');
           if (!fb_dtsg) {
-            throw new utils.CustomError(
+            throw Error(
               "Could not find fb_dtsg in HTML after requesting Facebook."
             );
           }

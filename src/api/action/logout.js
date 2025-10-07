@@ -1,8 +1,9 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getFrom } = require("../../utils/constants");
+const { saveCookies } = require("../../utils/client");
 module.exports = function(defaultFuncs, api, ctx) {
   return function logout(callback) {
     let resolveFunc = function() {};
@@ -31,7 +32,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         const elem = resData.jsmods.instances[0][2][0].filter(function(v) {
           return v.value === "logout";
@@ -42,14 +43,14 @@ module.exports = function(defaultFuncs, api, ctx) {
         })[0][1].__html;
 
         const form = {
-          fb_dtsg: utils.getFrom(html, '"fb_dtsg" value="', '"'),
-          ref: utils.getFrom(html, '"ref" value="', '"'),
-          h: utils.getFrom(html, '"h" value="', '"')
+          fb_dtsg: getFrom(html, '"fb_dtsg" value="', '"'),
+          ref: getFrom(html, '"ref" value="', '"'),
+          h: getFrom(html, '"h" value="', '"')
         };
 
         return defaultFuncs
           .post("https://www.facebook.com/logout.php", ctx.jar, form)
-          .then(utils.saveCookies(ctx.jar));
+          .then(saveCookies(ctx.jar));
       })
       .then(function(res) {
         if (!res.headers) {
@@ -58,7 +59,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
         return defaultFuncs
           .get(res.headers.location, ctx.jar)
-          .then(utils.saveCookies(ctx.jar));
+          .then(saveCookies(ctx.jar));
       })
       .then(function() {
         ctx.loggedIn = false;

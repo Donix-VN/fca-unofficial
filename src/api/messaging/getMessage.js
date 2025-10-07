@@ -1,13 +1,8 @@
 "use strict";
 
-// Original
-/**
- * @author https://github.com/Schmavery/facebook-chat-api/pull/865
- */
-
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { _formatAttachment } = require("../../utils/format");
+const { parseAndCheckLogin } = require("../../utils/client");
 function formatMessage(threadID, data) {
   switch (data.__typename) {
     case "ThreadNameMessage":
@@ -151,7 +146,7 @@ function formatMessage(threadID, data) {
             ? data.blob_attachments.length.map(att => {
                 let x;
                 try {
-                  x = utils._formatAttachment(att);
+                  x = _formatAttachment(att);
                 } catch (ex) {
                   x = att;
                   x.error = ex;
@@ -272,7 +267,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     defaultFuncs
       .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(resData => {
         if (resData[resData.length - 1].error_results > 0) {
           throw resData[0].o0.errors;

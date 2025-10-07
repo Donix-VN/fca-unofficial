@@ -1,60 +1,51 @@
 "use strict";
 
-const utils = require("../../utils");
-const log = require("npmlog");
+const { generateOfflineThreadingID } = require("../../utils/format");
 
-module.exports = function(defaultFuncs, api, ctx) {
-  return function forwardAttachment(attachmentID, userOrUsers, callback) {
-    let resolveFunc = function() {};
-    let rejectFunc = function() {};
-    const returnPromise = new Promise(function(resolve, reject) {
+module.exports = function (defaultFuncs, api, ctx) {
+  return async function forwardMessage(threadID, forwardedMsgID, callback) {
+    let resolveFunc, rejectFunc;
+    const returnPromise = new Promise((resolve, reject) => {
       resolveFunc = resolve;
       rejectFunc = reject;
     });
     if (!callback) {
-      callback = function(err) {
-        if (err) {
-          return rejectFunc(err);
-        }
-        resolveFunc();
+      callback = (err, data) => {
+        if (err) return rejectFunc(err);
+        resolveFunc(data);
       };
     }
-
-    const form = {
-      attachment_id: attachmentID
-    };
-
-    if (utils.getType(userOrUsers) !== "Array") {
-      userOrUsers = [userOrUsers];
-    }
-
-    const timestamp = Math.floor(Date.now() / 1000);
-
-    for (let i = 0; i < userOrUsers.length; i++) {
-      //That's good, the key of the array is really timestmap in seconds + index
-      //Probably time when the attachment will be sent?
-      form["recipient_map[" + (timestamp + i) + "]"] = userOrUsers[i];
-    }
-
-    defaultFuncs
-      .post(
-        "https://www.facebook.com/mercury/attachments/forward/",
-        ctx.jar,
-        form
-      )
-      .then(utils.parseAndCheckLogin(ctx.jar, defaultFuncs))
-      .then(function(resData) {
-        if (resData.error) {
-          throw resData;
+    let count_req = 0
+    const payload = {
+      epoch_id: generateOfflineThreadingID(),
+      tasks: [
+        {
+          failure_count: null,
+          label: "46",
+          payload: JSON.stringify({
+            thread_id: threadID,
+            otid: generateOfflineThreadingID(),
+            source: 65544,
+            send_type: 5,
+            sync_group: 1,
+            mark_thread_read: 0,
+            forwarded_msg_id: forwardedMsgID,
+            strip_forwarded_msg_caption: 0,
+            initiating_source: 1
+          }),
+          queue_name: threadID,
+          task_id: Math.floor(Math.random() * 1001)
         }
-
-        return callback();
-      })
-      .catch(function(err) {
-        log.error("forwardAttachment", err);
-        return callback(err);
-      });
-
+      ],
+      version_id: "8768858626531631"
+    };
+    const form = JSON.stringify({
+      app_id: "772021112871879",
+      payload: JSON.stringify(payload),
+      "request_id": ++count_req,
+      "type": 3
+    });
+    mqttClient.publish("/ls_req", form);
     return returnPromise;
   };
 };

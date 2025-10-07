@@ -1,12 +1,12 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { formatID, getType } = require("../../utils/format");
 function createProfileUrl(url, username, id) {
   if (url) return url;
   return (
-    "https://www.facebook.com/" + (username || utils.formatID(id.toString()))
+    "https://www.facebook.com/" + (username || formatID(id.toString()))
   );
 }
 
@@ -17,7 +17,7 @@ function formatParticipants(participants) {
       case "User":
         return {
           accountType: p["__typename"],
-          userID: utils.formatID(p.id.toString()), // do we need .toString()? when it is not a string?
+          userID: formatID(p.id.toString()), // do we need .toString()? when it is not a string?
           name: p.name,
           shortName: p.short_name,
           gender: p.gender,
@@ -35,7 +35,7 @@ function formatParticipants(participants) {
       case "Page":
         return {
           accountType: p["__typename"],
-          userID: utils.formatID(p.id.toString()), // or maybe... pageID?
+          userID: formatID(p.id.toString()), // or maybe... pageID?
           name: p.name,
           url: p.url,
           profilePicture: p.big_image_src.uri,
@@ -51,7 +51,7 @@ function formatParticipants(participants) {
       case "UnavailableMessagingActor":
         return {
           accountType: p["__typename"],
-          userID: utils.formatID(p.id.toString()),
+          userID: formatID(p.id.toString()),
           name: p.name,
           url: createProfileUrl(p.url, p.username, p.id), // in this case p.url is null all the time
           profilePicture: p.big_image_src.uri, // in this case it is default facebook photo, we could determine gender using it
@@ -66,7 +66,7 @@ function formatParticipants(participants) {
         );
         return {
           accountType: p["__typename"],
-          userID: utils.formatID(p.id.toString()),
+          userID: formatID(p.id.toString()),
           name: p.name || `[unknown ${p["__typename"]}]` // probably it will always be something... but fallback to [unknown], just in case
         };
     }
@@ -108,7 +108,7 @@ function formatThreadList(data) {
         : null;
     return {
       threadID: t.thread_key
-        ? utils.formatID(t.thread_key.thread_fbid || t.thread_key.other_user_id)
+        ? formatID(t.thread_key.thread_fbid || t.thread_key.other_user_id)
         : null, // shall never be null
       name: getThreadName(t),
       unreadCount: t.unread_count,
@@ -140,7 +140,7 @@ function formatThreadList(data) {
         ? lastMessageNode.extensible_attachment
         : null, // TODO: not sure if it works
       snippetSender: lastMessageNode
-        ? utils.formatID(
+        ? formatID(
             (lastMessageNode.message_sender.messaging_actor.id || "").toString()
           )
         : null,
@@ -171,25 +171,25 @@ module.exports = function(defaultFuncs, api, ctx) {
   return function getThreadList(limit, timestamp, tags, callback) {
     if (
       !callback &&
-      (utils.getType(tags) === "Function" ||
-        utils.getType(tags) === "AsyncFunction")
+      (getType(tags) === "Function" ||
+        getType(tags) === "AsyncFunction")
     ) {
       callback = tags;
       tags = [""];
     }
     if (
-      utils.getType(limit) !== "Number" ||
+      getType(limit) !== "Number" ||
       !Number.isInteger(limit) ||
       limit <= 0
     )
       throw { error: "getThreadList: limit must be a positive integer" };
     if (
-      utils.getType(timestamp) !== "Null" &&
-      (utils.getType(timestamp) !== "Number" || !Number.isInteger(timestamp))
+      getType(timestamp) !== "Null" &&
+      (getType(timestamp) !== "Number" || !Number.isInteger(timestamp))
     )
       throw { error: "getThreadList: timestamp must be an integer or null" };
-    if (utils.getType(tags) === "String") tags = [tags];
-    if (utils.getType(tags) !== "Array")
+    if (getType(tags) === "String") tags = [tags];
+    if (getType(tags) !== "Array")
       throw { error: "getThreadList: tags must be an array" };
     var resolveFunc = function() {};
     var rejectFunc = function() {};
@@ -198,8 +198,8 @@ module.exports = function(defaultFuncs, api, ctx) {
       rejectFunc = reject;
     });
     if (
-      utils.getType(callback) !== "Function" &&
-      utils.getType(callback) !== "AsyncFunction"
+      getType(callback) !== "Function" &&
+      getType(callback) !== "AsyncFunction"
     ) {
       callback = function(err, data) {
         if (err) return rejectFunc(err);
@@ -207,7 +207,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       };
     }
     const form = {
-      av: ctx.globalOptions.pageID,
+      av: ctx.userID,
       queries: JSON.stringify({
         o0: {
           doc_id: "3336396659757871",
@@ -224,7 +224,7 @@ module.exports = function(defaultFuncs, api, ctx) {
     };
     defaultFuncs
       .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(resData => {
         if (resData[resData.length - 1].error_results > 0)
           throw resData[0].o0.errors;

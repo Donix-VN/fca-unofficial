@@ -1,8 +1,8 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function deleteMessage(messageOrMessages, callback) {
     let resolveFunc = function() {};
@@ -24,7 +24,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       client: "mercury"
     };
 
-    if (utils.getType(messageOrMessages) !== "Array") {
+    if (getType(messageOrMessages) !== "Array") {
       messageOrMessages = [messageOrMessages];
     }
 
@@ -38,7 +38,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

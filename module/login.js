@@ -1,5 +1,5 @@
 "use strict";
-const utils = require("../src/utils");
+const { getType } = require("../src/utils/format");
 const { setOptions } = require("./options");
 const { loadConfig } = require("./config");
 const { config } = loadConfig();
@@ -8,7 +8,7 @@ global.fca = { config };
 const loginHelper = require("./loginHelper");
 
 function login(loginData, options, callback) {
-  if (utils.getType(options) === "Function" || utils.getType(options) === "AsyncFunction") {
+  if (getType(options) === "Function" || getType(options) === "AsyncFunction") {
     callback = options;
     options = {};
   }
@@ -28,7 +28,7 @@ function login(loginData, options, callback) {
   };
   setOptions(globalOptions, options);
   let prCallback = null;
-  if (utils.getType(callback) !== "Function" && utils.getType(callback) !== "AsyncFunction") {
+  if (getType(callback) !== "Function" && getType(callback) !== "AsyncFunction") {
     let rejectFunc = null;
     let resolveFunc = null;
     var returnPromise = new Promise(function (resolve, reject) {

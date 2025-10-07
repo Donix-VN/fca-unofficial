@@ -1,11 +1,11 @@
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 module.exports = function(defaultFuncs, api, ctx) {
   return function handleMessageRequest(threadID, accept, callback) {
-    if (utils.getType(accept) !== "Boolean") {
+    if (getType(accept) !== "Boolean") {
       throw {
         error: "Please pass a boolean as a second argument."
       };
@@ -31,7 +31,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       client: "mercury"
     };
 
-    if (utils.getType(threadID) !== "Array") {
+    if (getType(threadID) !== "Array") {
       threadID = [threadID];
     }
 
@@ -47,7 +47,7 @@ module.exports = function(defaultFuncs, api, ctx) {
         ctx.jar,
         form
       )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.error) {
           throw resData;

@@ -1,6 +1,8 @@
-const utils = require("../../utils");
+"use strict";
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
+const { isReadableStream } = require("../../utils/constants");
 module.exports = function(defaultFuncs, api, ctx) {
   function upload(attachments, callback) {
     callback = callback || function() {};
@@ -8,11 +10,11 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     // create an array of promises
     for (let i = 0; i < attachments.length; i++) {
-      if (!utils.isReadableStream(attachments[i])) {
+      if (!isReadableStream(attachments[i])) {
         throw {
           error:
             "Attachment should be a readable stream and not " +
-            utils.getType(attachments[i]) +
+            getType(attachments[i]) +
             "."
         };
       }
@@ -30,7 +32,7 @@ module.exports = function(defaultFuncs, api, ctx) {
             form,
             {}
           )
-          .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+          .then(parseAndCheckLogin(ctx, defaultFuncs))
           .then(function(resData) {
             if (resData.error) {
               throw resData;
@@ -57,9 +59,9 @@ module.exports = function(defaultFuncs, api, ctx) {
   return function uploadAttachment(attachments, callback) {
     if (
       !attachments &&
-      !utils.isReadableStream(attachments) &&
-      !utils.getType(attachments) === "Array" &&
-      utils.getType(attachments) === "Array" && !attachments.length
+      !isReadableStream(attachments) &&
+      !getType(attachments) === "Array" &&
+      getType(attachments) === "Array" && !attachments.length
     )
       throw { error: "Please pass an attachment or an array of attachments." };
 
@@ -79,7 +81,7 @@ module.exports = function(defaultFuncs, api, ctx) {
       };
     }
 
-    if (utils.getType(attachments) !== "Array") attachments = [attachments];
+    if (getType(attachments) !== "Array") attachments = [attachments];
 
     upload(attachments, (err, info) => {
       if (err) {

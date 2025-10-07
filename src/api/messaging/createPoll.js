@@ -1,70 +1,43 @@
 "use strict";
 
-const utils = require("../../utils");
-const log = require("npmlog");
+const { generateOfflineThreadingID } = require("../../utils/format");
 
-module.exports = function(defaultFuncs, api, ctx) {
-  return function createPoll(title, threadID, options, callback) {
-    let resolveFunc = function() {};
-    let rejectFunc = function() {};
-    const returnPromise = new Promise(function(resolve, reject) {
-      resolveFunc = resolve;
-      rejectFunc = reject;
-    });
-
-    if (!callback) {
-      if (utils.getType(options) == "Function") {
-        callback = options;
-        options = null;
-      } else {
-        callback = function(err) {
-          if (err) {
-            return rejectFunc(err);
+module.exports = function (defaultFuncs, api, ctx) {
+  return async function createPoll(threadID, questionText, options) {
+    let count_req = 0
+    return new Promise((resolve, reject) => {
+      const payload = {
+        epoch_id: generateOfflineThreadingID(),
+        tasks: [
+          {
+            failure_count: null,
+            label: "163",
+            payload: JSON.stringify({
+              question_text: questionText,
+              thread_key: threadID,
+              options: options,
+              sync_group: 1
+            }),
+            queue_name: "poll_creation",
+            task_id: Math.floor(Math.random() * 1001)
           }
-          resolveFunc();
-        };
-      }
-    }
-    if (!options) {
-      options = {};
-    }
+        ],
+        version_id: "8768858626531631"
+      };
 
-    const form = {
-      target_id: threadID,
-      question_text: title
-    };
-
-    // Set fields for options (and whether they are selected initially by the posting user)
-    let ind = 0;
-    for (const opt in options) {
-      if (options.hasOwnProperty(opt)) {
-        form["option_text_array[" + ind + "]"] = opt;
-        form["option_is_selected_array[" + ind + "]"] = options[opt]
-          ? "1"
-          : "0";
-        ind++;
-      }
-    }
-
-    defaultFuncs
-      .post(
-        "https://www.facebook.com/messaging/group_polling/create_poll/?dpr=1",
-        ctx.jar,
-        form
-      )
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
-      .then(function(resData) {
-        if (resData.payload.status != "success") {
-          throw resData;
-        }
-
-        return callback();
-      })
-      .catch(function(err) {
-        log.error("createPoll", err);
-        return callback(err);
+      const form = JSON.stringify({
+        app_id: "772021112871879",
+        payload: JSON.stringify(payload),
+        request_id: ++count_req,
+        type: 3
       });
 
-    return returnPromise;
+      try {
+        mqttClient.publish("/ls_req", form);
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
   };
 };

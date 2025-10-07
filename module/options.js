@@ -1,4 +1,5 @@
-const utils = require("../src/utils");
+const { getType } = require("../src/utils/format");
+const { setProxy } = require("../src/utils/request");
 const logger = require("../func/logger");
 const Boolean_Option = [
   "online",
@@ -20,11 +21,6 @@ function setOptions(globalOptions, options) {
       continue;
     }
     switch (key) {
-      case "pauseLog": {
-        if (options.pauseLog) log.pause();
-        else log.resume();
-        break;
-      }
       case "userAgent": {
         globalOptions.userAgent = options.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
         break;
@@ -32,10 +28,10 @@ function setOptions(globalOptions, options) {
       case "proxy": {
         if (typeof options.proxy !== "string") {
           delete globalOptions.proxy;
-          utils.setProxy();
+          setProxy();
         } else {
           globalOptions.proxy = options.proxy;
-          utils.setProxy(globalOptions.proxy);
+          setProxy(globalOptions.proxy);
         }
         break;
       }

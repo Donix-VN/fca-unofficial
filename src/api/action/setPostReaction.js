@@ -1,9 +1,8 @@
-
 "use strict";
 
-const utils = require("../../utils");
 const log = require("npmlog");
-
+const { parseAndCheckLogin } = require("../../utils/client");
+const { getType } = require("../../utils/format");
 function formatData(resData) {
   return {
     viewer_feedback_reaction_info:
@@ -25,8 +24,8 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     if (!callback) {
       if (
-        utils.getType(type) === "Function" ||
-        utils.getType(type) === "AsyncFunction"
+        getType(type) === "Function" ||
+        getType(type) === "AsyncFunction"
       ) {
         callback = type;
         type = 0;
@@ -51,11 +50,11 @@ module.exports = function(defaultFuncs, api, ctx) {
       angry: 8
     };
 
-    if (utils.getType(type) !== "Number" && utils.getType(type) === "String") {
+    if (getType(type) !== "Number" && getType(type) === "String") {
       type = map[type.toLowerCase()];
     }
 
-    if (utils.getType(type) !== "Number" && utils.getType(type) !== "String") {
+    if (getType(type) !== "Number" && getType(type) !== "String") {
       throw {
         error: "setPostReaction: Invalid reaction type"
       };
@@ -68,14 +67,14 @@ module.exports = function(defaultFuncs, api, ctx) {
     }
 
     const form = {
-      av: ctx.i_userID || ctx.userID,
+      av: ctx.userID,
       fb_api_caller_class: "RelayModern",
       fb_api_req_friendly_name: "CometUFIFeedbackReactMutation",
       doc_id: "4769042373179384",
       variables: JSON.stringify({
         input: {
-          actor_id: ctx.i_userID || ctx.userID,
-          feedback_id: new Buffer("feedback:" + postID).toString("base64"),
+          actor_id: ctx.userID,
+          feedback_id: Buffer.from("feedback:" + postID).toString("base64"),
           feedback_reaction: type,
           feedback_source: "OBJECT",
           is_tracking_encrypted: true,
@@ -90,7 +89,7 @@ module.exports = function(defaultFuncs, api, ctx) {
 
     defaultFuncs
       .post("https://www.facebook.com/api/graphql/", ctx.jar, form)
-      .then(utils.parseAndCheckLogin(ctx, defaultFuncs))
+      .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(function(resData) {
         if (resData.errors) {
           throw resData;
