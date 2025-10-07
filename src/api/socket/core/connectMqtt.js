@@ -81,9 +81,10 @@ module.exports = function createListenMqtt(deps) {
         return;
       }
       logger(`MQTT error: ${msg}`, "error");
-      mqttClient.end();
-      logger("MQTT autoReconnect listenMqtt() in 2000ms", "warn");
-      setTimeout(() => listenMqtt(defaultFuncs, api, ctx, globalCallback), 2000);
+      // mqttClient.end();
+      // logger("MQTT autoReconnect listenMqtt() in 2000ms", "warn");
+      // setTimeout(() => listenMqtt(defaultFuncs, api, ctx, globalCallback), 2000);
+      process.exit(1);
     });
     mqttClient.on("connect", function () {
       if (process.env.OnStatus === undefined) {
