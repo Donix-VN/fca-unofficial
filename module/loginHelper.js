@@ -5,7 +5,6 @@ const logger = require("../func/logger");
 const { get, post, jar, makeDefaults } = require("../src/utils/request");
 const { saveCookies, getAppState } = require("../src/utils/client");
 const { getFrom } = require("../src/utils/constants");
-const fs = require("fs");
 const path = require("path");
 const models = require("../src/database/models");
 const logger = require("../func/logger");
