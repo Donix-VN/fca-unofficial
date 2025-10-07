@@ -127,6 +127,35 @@ const genTotp = async secret => {
   return typeof r === "object" ? r.otp : r;
 };
 
+function normalizeCookieHeaderString(s) {
+  let str = String(s || "").trim();
+  if (!str) return [];
+  if (/^cookie\s*:/i.test(str)) str = str.replace(/^cookie\s*:/i, "").trim();
+  str = str.replace(/\r?\n/g, " ").replace(/\s*;\s*/g, ";");
+  const parts = str.split(";").map(v => v.trim()).filter(Boolean);
+  const out = [];
+  for (const p of parts) {
+    const eq = p.indexOf("=");
+    if (eq <= 0) continue;
+    const k = p.slice(0, eq).trim();
+    const v = p.slice(eq + 1).trim().replace(/^"(.*)"$/, "$1");
+    if (!k) continue;
+    out.push(`${k}=${v}`);
+  }
+  return out;
+}
+
+function setJarFromPairs(j, pairs, domain) {
+  const expires = new Date(Date.now() + 31536e6).toUTCString();
+  for (const kv of pairs) {
+    const cookieStr = `${kv}; expires=${expires}; domain=${domain}; path=/;`;
+    try {
+      if (typeof j.setCookieSync === "function") j.setCookieSync(cookieStr, "https://www.facebook.com");
+      else j.setCookie(cookieStr, "https://www.facebook.com");
+    } catch { }
+  }
+}
+
 function cookieHeaderFromJar(j) {
   const urls = ["https://www.facebook.com", "https://www.messenger.com"];
   const seen = new Set();
@@ -135,7 +164,7 @@ function cookieHeaderFromJar(j) {
     let s = "";
     try {
       s = typeof j.getCookieStringSync === "function" ? j.getCookieStringSync(u) : "";
-    } catch {}
+    } catch { }
     if (!s) continue;
     for (const kv of s.split(";")) {
       const t = kv.trim();
@@ -174,7 +203,7 @@ async function ensureUniqueIndex(sequelize) {
   if (uniqueIndexEnsured) return;
   try {
     await sequelize.getQueryInterface().addIndex("app_state_backups", ["userID", "type"], { unique: true, name: "app_state_user_type_unique" });
-  } catch {}
+  } catch { }
   uniqueIndexEnsured = true;
 }
 
@@ -231,7 +260,7 @@ async function getLatestBackupAny(type) {
 async function tokens(username, password, twofactor = null) {
   const t0 = process.hrtime.bigint();
   if (!username || !password) {
-    logger("Missing email or password", {}, "error");
+    logger("Missing email or password", "error");
     return { status: false, message: "Please provide email and password" };
   }
   logger(`AUTO-LOGIN: Initialize login ${mask(username, 2)}`, "info");
@@ -263,13 +292,13 @@ async function tokens(username, password, twofactor = null) {
     if (code) logger(`AUTO-LOGIN: Error on request #1 ${code} ${message}`, "warn");
     logger("AUTO-LOGIN: Processing twofactor...", "info");
     if (code === 401) return { status: false, message: message || "Unauthorized" };
-    if (twofactor === "0" || !twofactor) {
-      logger("AUTO-LOGIN: 2FA required but secret missing", {}, "warn");
+    if (!config.credentials?.twofactor) {
+      logger("AUTO-LOGIN: 2FA required but secret missing", "warn");
       return { status: false, message: "Please provide the 2FA secret!" };
     }
     try {
       const dataErr = e && e.data && e.data.error && e.data.error.error_data ? e.data.error.error_data : {};
-      const codeTotp = await genTotp(twofactor);
+      const codeTotp = await genTotp(config.credentials.twofactor);
       logger(`AUTO-LOGIN: Performing 2FA ${mask(codeTotp, 2)}`, "info");
       const form2 = { ...baseForm, twofactor_code: codeTotp, encrypted_msisdn: "", userid: dataErr.uid || "", machine_id: dataErr.machine_id || baseForm.machine_id, first_factor: dataErr.login_first_factor || "", credentials_type: "two_factor" };
       form2.sig = encodeSig(sortObject(form2));
@@ -284,56 +313,10 @@ async function tokens(username, password, twofactor = null) {
       logger(`AUTO-LOGIN: Done success login with 2FA ${Math.round(t1)}ms`, "info");
       return { status: true, cookies };
     } catch {
-      logger("AUTO-LOGIN: 2FA failed", {}, "error");
+      logger("AUTO-LOGIN: 2FA failed", "error");
       return { status: false, message: "Invalid two-factor code!" };
     }
   }
-}
-
-function normalizeCookieHeaderString(s) {
-  let str = String(s || "").trim();
-  if (!str) return [];
-  if (/^cookie\s*:/i.test(str)) str = str.replace(/^cookie\s*:/i, "").trim();
-  str = str.replace(/\r?\n/g, " ").replace(/\s*;\s*/g, ";");
-  const parts = str.split(";").map(v => v.trim()).filter(Boolean);
-  const out = [];
-  for (const p of parts) {
-    const eq = p.indexOf("=");
-    if (eq <= 0) continue;
-    const k = p.slice(0, eq).trim();
-    const v = p.slice(eq + 1).trim().replace(/^"(.*)"$/, "$1");
-    if (!k) continue;
-    out.push(`${k}=${v}`);
-  }
-  return out;
-}
-
-function setJarFromPairs(j, pairs, domain) {
-  const expires = new Date(Date.now() + 31536e6).toUTCString();
-  for (const kv of pairs) {
-    const cookieStr = `${kv}; expires=${expires}; domain=${domain}; path=/;`;
-    try {
-      if (typeof j.setCookieSync === "function") j.setCookieSync(cookieStr, "https://www.facebook.com");
-      else j.setCookie(cookieStr, "https://www.facebook.com");
-    } catch {}
-  }
-}
-
-function makeLogin(j, email, password, globalOptions, callback, prCallback) {
-  return async function () {
-    const u = email || config.credentials.email;
-    const p = password || config.credentials.password;
-    const tf = config.credentials.twofactor || null;
-    if (!u || !p) return;
-    const r = await tokens(u, p, tf);
-    if (r && r.status && Array.isArray(r.cookies)) {
-      const pairs = r.cookies.map(c => `${c.key || c.name}=${c.value}`);
-      setJarFromPairs(j, pairs, ".facebook.com");
-      await get("https://www.facebook.com/", j, null, globalOptions).then(saveCookies(j));
-    } else {
-      throw new Error(r && r.message ? r.message : "Login failed");
-    }
-  };
 }
 
 async function hydrateJarFromDB(userID) {
@@ -358,7 +341,7 @@ async function hydrateJarFromDB(userID) {
       let parsed = null;
       try {
         parsed = JSON.parse(app);
-      } catch {}
+      } catch { }
       if (Array.isArray(parsed)) {
         const pairs = parsed.map(c => [c.name || c.key, c.value].join("="));
         setJarFromPairs(jar, pairs, ".facebook.com");
@@ -377,10 +360,8 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) 
     cs.find(c => c.key === "c_user")?.value ||
     cs.find(c => c.name === "i_user")?.value ||
     cs.find(c => c.name === "c_user")?.value;
-
   let userID = getUID(currentCookies);
   if (userID) return { html: currentHtml, cookies: currentCookies, userID };
-
   const hydrated = await hydrateJarFromDB(null);
   if (hydrated) {
     logger("AppState backup live — proceeding to login", "info");
@@ -391,12 +372,11 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) 
     const uidB = getUID(cookiesB);
     if (uidB) return { html: htmlB, cookies: cookiesB, userID: uidB };
   }
-
   if (config.autoLogin !== true) throw new Error("AppState backup die — Auto-login is disabled");
   logger("AppState backup die — proceeding to email/password login", "warn");
-  const u = config.credentials.email;
-  const p = config.credentials.password;
-  const tf = config.credentials.twofactor || null;
+  const u = config.credentials?.email;
+  const p = config.credentials?.password;
+  const tf = config.credentials?.twofactor || null;
   if (!u || !p) throw new Error("Missing user cookie");
   const r = await tokens(u, p, tf);
   if (!(r && r.status && Array.isArray(r.cookies))) throw new Error(r && r.message ? r.message : "Login failed");
@@ -411,9 +391,25 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) 
   return { html: html2, cookies: cookies2, userID: uid2 };
 }
 
-function loginHelper(appState, Cookie, email, password, globalOptions, callback, prCallback) {
+function makeLogin(j, email, password, globalOptions) {
+  return async function () {
+    const u = email || config.credentials?.email;
+    const p = password || config.credentials?.password;
+    const tf = config.credentials?.twofactor || null;
+    if (!u || !p) return;
+    const r = await tokens(u, p, tf);
+    if (r && r.status && Array.isArray(r.cookies)) {
+      const pairs = r.cookies.map(c => `${c.key || c.name}=${c.value}`);
+      setJarFromPairs(j, pairs, ".facebook.com");
+      await get("https://www.facebook.com/", j, null, globalOptions).then(saveCookies(j));
+    } else {
+      throw new Error(r && r.message ? r.message : "Login failed");
+    }
+  };
+}
+
+function loginHelper(appState, Cookie, email, password, globalOptions, callback) {
   try {
-    let main;
     const domain = ".facebook.com";
     try {
       if (appState) {
@@ -421,7 +417,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
           let parsed = appState;
           try {
             parsed = JSON.parse(appState);
-          } catch {}
+          } catch { }
           if (Array.isArray(parsed)) {
             const pairs = parsed.map(c => [c.name || c.key, c.value].join("="));
             setJarFromPairs(jar, pairs, domain);
@@ -449,7 +445,6 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
     } catch (e) {
       return callback(e);
     }
-
     (async () => {
       if (appState || Cookie) {
         return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
@@ -462,7 +457,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
       logger("AppState backup die — proceeding to email/password login", "warn");
       return get("https://www.facebook.com/", null, null, globalOptions)
         .then(saveCookies(jar))
-        .then(makeLogin(jar, email, password, globalOptions, callback, prCallback))
+        .then(makeLogin(jar, email, password, globalOptions))
         .then(function () {
           return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
         });
@@ -475,34 +470,20 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
           cookies.find(c => c.key === "c_user")?.value ||
           cookies.find(c => c.name === "i_user")?.value ||
           cookies.find(c => c.name === "c_user")?.value;
-
-        try {
-          const userDataMatch = String(html).match(/\["CurrentUserInitialData",\[\],({.*?}),\d+\]/);
-          if (userDataMatch) {
-            const info = JSON.parse(userDataMatch[1]);
-            logger(`Đăng nhập tài khoản: ${info.NAME} (${info.USER_ID})`, "info");
-          } else if (userID) {
-            logger(`ID người dùng: ${userID}`, "info");
-          }
-        } catch {}
-
         if (!userID) {
           const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions);
           html = retried.html;
           cookies = retried.cookies;
           userID = retried.userID;
         }
-
         if (html.includes("/checkpoint/block/?next")) {
           logger("Appstate die, vui lòng thay cái mới!", "error");
           throw new Error("Checkpoint");
         }
-
         let mqttEndpoint;
         let region = "PRN";
         let fb_dtsg;
         let irisSeqID;
-
         try {
           const m1 = html.match(/"endpoint":"([^"]+)"/);
           const m2 = m1 ? null : html.match(/endpoint\\":\\"([^\\"]+)\\"/);
@@ -526,11 +507,9 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
         } catch { }
         const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
         if (tokenMatch) fb_dtsg = tokenMatch[1];
-
         try {
           if (userID) await backupAppStateSQL(jar, userID);
-        } catch {}
-
+        } catch { }
         Promise.resolve()
           .then(function () {
             if (models && models.sequelize && typeof models.sequelize.authenticate === "function") {
@@ -546,9 +525,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
             console.error(error);
             console.error("Database connection failed:", error && error.message ? error.message : String(error));
           });
-
         logger("FCA fix/update by DongDev (Donix-VN)", "info");
-
         const ctx = {
           userID,
           jar,
@@ -568,7 +545,22 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
           wsReqNumber: 0,
           wsTaskNumber: 0
         };
-
+        ctx.performAutoLogin = async () => {
+          try {
+            const u = config.credentials?.email || email;
+            const p = config.credentials?.password || password;
+            const tf = config.credentials?.twofactor || null;
+            if (!u || !p) return false;
+            const r = await tokens(u, p, tf);
+            if (!(r && r.status && Array.isArray(r.cookies))) return false;
+            const pairs = r.cookies.map(c => `${c.key || c.name}=${c.value}`);
+            setJarFromPairs(jar, pairs, ".facebook.com");
+            await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+            return true;
+          } catch {
+            return false;
+          }
+        };
         const api = {
           setOptions: require("./options").setOptions.bind(null, globalOptions),
           getCookies: function () {
@@ -585,7 +577,6 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
             return await getLatestBackup(uid, "cookie");
           }
         };
-
         const defaultFuncs = makeDefaults(html, userID, ctx);
         const srcRoot = path.join(__dirname, "../src/api");
         let loaded = 0;
@@ -605,23 +596,18 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback,
             loaded++;
           });
         });
-
         logger(`Loaded ${loaded} FCA API methods${skipped ? `, skipped ${skipped} duplicates` : ""}`);
-
-        api.listen = api.listenMqtt;
-
-        setInterval(function () {
-          api
-            .refreshFb_dtsg()
-            .then(function () {
-              logger("Successfully refreshed fb_dtsg", "[ FCA-UNO ] >");
-            })
-            .catch(function () {
+        if (api.listenMqtt) api.listen = api.listenMqtt;
+        if (api.refreshFb_dtsg) {
+          setInterval(function () {
+            api.refreshFb_dtsg().then(function () {
+              logger("Successfully refreshed fb_dtsg");
+            }).catch(function () {
               logger("An error occurred while refreshing fb_dtsg", "error");
             });
-        }, 86400000);
-
-        logger("Login successful!", "[ FCA-UNO ] >");
+          }, 86400000);
+        }
+        logger("Login successful!");
         callback(null, api);
       })
       .catch(function (e) {

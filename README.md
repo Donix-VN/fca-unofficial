@@ -8,6 +8,7 @@
 ## ⚠️ Important Disclaimer
 
 **We are not responsible if your account gets banned for spammy activities such as:**
+
 - Sending lots of messages to people you don't know
 - Sending messages very quickly
 - Sending spammy looking URLs
@@ -15,13 +16,14 @@
 
 **Recommendation:** Use Firefox browser or [this website](https://fca.dongdev.id.vn) to reduce logout issues, especially for iOS users.
 
-**Support:** If you encounter errors, contact us [here](https://www.facebook.com/minhdong.dev)
+**Support:** If you encounter errors, contact us [here](https://www.facebook.com/mdong.dev)
 
 ## 🔍 Introduction
 
 Facebook now has an [official API for chat bots](https://developers.facebook.com/docs/messenger-platform), however it's only available for Facebook Pages.
 
 `@dongdev/fca-unofficial` is the only API that allows you to automate chat functionalities on a **user account** by emulating the browser. This means:
+
 - Making the exact same GET/POST requests as a browser
 - Does not work with auth tokens
 - Requires Facebook account credentials (email/password) or AppState
@@ -109,13 +111,13 @@ login({ appState: [] }, (err, api) => {
 
 ## 📝 Message Types
 
-| Type             | Usage                                                           |
-| ---------------- | --------------------------------------------------------------- |
+| Type                   | Usage                                                             |
+| ---------------------- | ----------------------------------------------------------------- |
 | **Regular text** | `{ body: "message text" }`                                      |
 | **Sticker**      | `{ sticker: "sticker_id" }`                                     |
 | **File/Image**   | `{ attachment: fs.createReadStream(path) }` or array of streams |
 | **URL**          | `{ url: "https://example.com" }`                                |
-| **Large emoji**  | `{ emoji: "👍", emojiSize: "large" }` (small/medium/large)       |
+| **Large emoji**  | `{ emoji: "👍", emojiSize: "large" }` (small/medium/large)      |
 
 **Note:** A message can only be a regular message (which can be empty) and optionally **one of the following**: a sticker, an attachment, or a URL.
 
@@ -228,6 +230,7 @@ api.setOptions({
 ```
 
 **By default:**
+
 - `listenEvents` is `false` - won't receive events like joining/leaving chat, title changes
 - `selfListen` is `false` - will ignore messages sent by the current account
 
@@ -252,6 +255,7 @@ api.setOptions({
 ## 📚 Full API Documentation
 
 See [DOCS.md](./DOCS.md) for detailed information about:
+
 - All available API methods
 - Parameters and options
 - Event types
@@ -291,6 +295,7 @@ api.setMessageReaction(reaction, messageID, callback);
 ## 🤝 Contributing
 
 Contributions are welcome! Please:
+
 1. Fork the repository
 2. Create a new branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)

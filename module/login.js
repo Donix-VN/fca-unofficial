@@ -1,11 +1,11 @@
-"use strict";
 const { getType } = require("../src/utils/format");
 const { setOptions } = require("./options");
 const { loadConfig } = require("./config");
-const { config } = loadConfig();
-if (config.autoUpdate) require("../func/checkUpdate").checkAndUpdateVersion(() => {});
-global.fca = { config };
+const { checkAndUpdateVersion } = require("../func/checkUpdate");
 const loginHelper = require("./loginHelper");
+
+const { config } = loadConfig();
+global.fca = { config };
 
 function login(loginData, options, callback) {
   if (getType(options) === "Function" || getType(options) === "AsyncFunction") {
@@ -28,10 +28,11 @@ function login(loginData, options, callback) {
   };
   setOptions(globalOptions, options);
   let prCallback = null;
+  let rejectFunc = null;
+  let resolveFunc = null;
+  let returnPromise = null;
   if (getType(callback) !== "Function" && getType(callback) !== "AsyncFunction") {
-    let rejectFunc = null;
-    let resolveFunc = null;
-    var returnPromise = new Promise(function (resolve, reject) {
+    returnPromise = new Promise(function (resolve, reject) {
       resolveFunc = resolve;
       rejectFunc = reject;
     });
@@ -41,7 +42,18 @@ function login(loginData, options, callback) {
     };
     callback = prCallback;
   }
-  loginHelper(loginData.appState, loginData.Cookie,loginData.email, loginData.password, globalOptions, callback, prCallback);
+  const proceed = () => loginHelper(loginData.appState, loginData.Cookie, loginData.email, loginData.password, globalOptions, callback, prCallback);
+  if (config && config.autoUpdate) {
+    const p = checkAndUpdateVersion();
+    if (p && typeof p.then === "function") {
+      p.then(proceed).catch(err => callback(err));
+    } else {
+      proceed();
+    }
+  } else {
+    proceed();
+  }
   return returnPromise;
 }
+
 module.exports = login;

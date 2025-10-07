@@ -304,72 +304,62 @@ module.exports = function (defaultFuncs, api, ctx) {
         resolveFunc(data);
       };
     }
-
-    try {
-      const msgType = getType(msg);
-      const threadIDType = getType(threadID);
-      const messageIDType = getType(replyToMessage);
-      if (msgType !== "String" && msgType !== "Object") return callback({ error: "Message should be of type string or object and not " + msgType + "." });
-      if (threadIDType !== "Array" && threadIDType !== "Number" && threadIDType !== "String") return callback({ error: "ThreadID should be of type number, string, or array and not " + threadIDType + "." });
-      if (replyToMessage && messageIDType !== "String") return callback({ error: "MessageID should be of type string and not " + threadIDType + "." });
-      if (msgType === "String") msg = { body: msg };
-
-      const disallowedProperties = Object.keys(msg).filter(prop => !allowedProperties[prop]);
-      if (disallowedProperties.length > 0) return callback({ error: "Disallowed props: `" + disallowedProperties.join(", ") + "`" });
-
-      const messageAndOTID = generateOfflineThreadingID();
-      const form = {
-        client: "mercury",
-        action_type: "ma-type:user-generated-message",
-        author: "fbid:" + ctx.userID,
-        timestamp: Date.now(),
-        timestamp_absolute: "Today",
-        timestamp_relative: generateTimestampRelative(),
-        timestamp_time_passed: "0",
-        is_unread: false,
-        is_cleared: false,
-        is_forward: false,
-        is_filtered_content: false,
-        is_filtered_content_bh: false,
-        is_filtered_content_account: false,
-        is_filtered_content_quasar: false,
-        is_filtered_content_invalid_app: false,
-        is_spoof_warning: false,
-        source: "source:chat:web",
-        "source_tags[0]": "source:chat",
-        body: msg.body ? msg.body.toString() : "",
-        html_body: false,
-        ui_push_phase: "V3",
-        status: "0",
-        offline_threading_id: messageAndOTID,
-        message_id: messageAndOTID,
-        threading_id: generateThreadingID(ctx.clientID),
-        ephemeral_ttl_mode: "0",
-        manual_retry_cnt: "0",
-        signatureID: getSignatureID(),
-        replied_to_message_id: replyToMessage ? replyToMessage.toString() : ""
-      };
-      applyPageAuthor(form, msg);
-      handleLocation(msg, form, callback, () =>
-        handleSticker(msg, form, callback, () =>
-          handleAttachment(msg, form, callback, () =>
-            handleUrl(msg, form, callback, () =>
-              handleEmoji(msg, form, callback, () =>
-                handleMention(msg, form, callback, () => {
-                  finalizeHasAttachment(form);
-                  send(form, threadID, messageAndOTID, callback, isGroup);
-                })
-              )
+    const msgType = getType(msg);
+    const threadIDType = getType(threadID);
+    const messageIDType = getType(replyToMessage);
+    if (msgType !== "String" && msgType !== "Object") return callback({ error: "Message should be of type string or object and not " + msgType + "." });
+    if (threadIDType !== "Array" && threadIDType !== "Number" && threadIDType !== "String") return callback({ error: "ThreadID should be of type number, string, or array and not " + threadIDType + "." });
+    if (replyToMessage && messageIDType !== "String") return callback({ error: "MessageID should be of type string and not " + threadIDType + "." });
+    if (msgType === "String") msg = { body: msg };
+    const disallowedProperties = Object.keys(msg).filter(prop => !allowedProperties[prop]);
+    if (disallowedProperties.length > 0) return callback({ error: "Disallowed props: `" + disallowedProperties.join(", ") + "`" });
+    const messageAndOTID = generateOfflineThreadingID();
+    const form = {
+      client: "mercury",
+      action_type: "ma-type:user-generated-message",
+      author: "fbid:" + ctx.userID,
+      timestamp: Date.now(),
+      timestamp_absolute: "Today",
+      timestamp_relative: generateTimestampRelative(),
+      timestamp_time_passed: "0",
+      is_unread: false,
+      is_cleared: false,
+      is_forward: false,
+      is_filtered_content: false,
+      is_filtered_content_bh: false,
+      is_filtered_content_account: false,
+      is_filtered_content_quasar: false,
+      is_filtered_content_invalid_app: false,
+      is_spoof_warning: false,
+      source: "source:chat:web",
+      "source_tags[0]": "source:chat",
+      body: msg.body ? msg.body.toString() : "",
+      html_body: false,
+      ui_push_phase: "V3",
+      status: "0",
+      offline_threading_id: messageAndOTID,
+      message_id: messageAndOTID,
+      threading_id: generateThreadingID(ctx.clientID),
+      ephemeral_ttl_mode: "0",
+      manual_retry_cnt: "0",
+      signatureID: getSignatureID(),
+      replied_to_message_id: replyToMessage ? replyToMessage.toString() : ""
+    };
+    applyPageAuthor(form, msg);
+    handleLocation(msg, form, callback, () =>
+      handleSticker(msg, form, callback, () =>
+        handleAttachment(msg, form, callback, () =>
+          handleUrl(msg, form, callback, () =>
+            handleEmoji(msg, form, callback, () =>
+              handleMention(msg, form, callback, () => {
+                finalizeHasAttachment(form);
+                send(form, threadID, messageAndOTID, callback, isGroup);
+              })
             )
           )
         )
-      );
-    } catch (e) {
-      log.error("sendMessage", e);
-      if (getType(e) === "Object" && e.error === "Not logged in.") ctx.loggedIn = false;
-      return callback(e);
-    }
-
+      )
+    );
     return returnPromise;
   };
 

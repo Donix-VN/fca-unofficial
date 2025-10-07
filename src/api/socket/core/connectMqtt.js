@@ -75,17 +75,15 @@ module.exports = function createListenMqtt(deps) {
     const mqttClient = ctx.mqttClient;
     global.mqttClient = mqttClient;
     mqttClient.on("error", function (err) {
-      logger("listenMqtt" + err, "error");
-      mqttClient.end();
-      if (ctx.globalOptions.autoReconnect) {
-        listenMqtt(defaultFuncs, api, ctx, globalCallback);
-      } else {
-        // utils.checkLiveCookie(ctx, defaultFuncs).then(res => {
-        //   globalCallback({ type: "stop_listen", error: "Connection refused: Server unavailable" }, null);
-        // }).catch(err => {
-        //   globalCallback({ type: "account_inactive", error: "Maybe your account is blocked by facebook, please login and check at https://facebook.com" }, null);
-        // });
+      const msg = String(err && err.message ? err.message : err || "");
+      if (ctx._ending && /No subscription existed/i.test(msg)) {
+        logger("MQTT ignore unsubscribe error during shutdown", "warn");
+        return;
       }
+      logger(`MQTT error: ${msg}`, "error");
+      mqttClient.end();
+      logger("MQTT autoReconnect listenMqtt() in 2000ms", "warn");
+      setTimeout(() => listenMqtt(defaultFuncs, api, ctx, globalCallback), 2000);
     });
     mqttClient.on("connect", function () {
       if (process.env.OnStatus === undefined) {
@@ -174,7 +172,7 @@ module.exports = function createListenMqtt(deps) {
         return;
       }
     });
-    mqttClient.on("close", function () {});
-    mqttClient.on("disconnect", () => {});
+    mqttClient.on("close", function () { });
+    mqttClient.on("disconnect", () => { });
   };
 };
