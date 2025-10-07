@@ -86,3 +86,6 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 
 ## v2.0.16 - 2025-10-07
 - Hotfix / auto bump
+
+## v2.0.17 - 2025-10-07
+- Hotfix / auto bump
