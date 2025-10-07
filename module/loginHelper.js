@@ -543,7 +543,8 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           clientID: ((Math.random() * 2147483648) | 0).toString(16),
           clientId: getFrom(html, '["MqttWebDeviceID",[],{"clientID":"', '"}') || "",
           wsReqNumber: 0,
-          wsTaskNumber: 0
+          wsTaskNumber: 0,
+          tasks: new Map()
         };
         ctx.performAutoLogin = async () => {
           try {
