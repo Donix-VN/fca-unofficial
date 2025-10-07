@@ -178,10 +178,24 @@ module.exports = function (defaultFuncs, api, ctx) {
       });
   }
 
+  function sendOnce(baseForm, threadID, isSingleUser) {
+    const otid = generateOfflineThreadingID();
+    const form = { ...baseForm, offline_threading_id: otid, message_id: otid };
+    return new Promise((resolve, reject) => {
+      sendContent(form, threadID, isSingleUser, otid, (err, info) => (err ? reject(err) : resolve(info)));
+    });
+  }
+
   function send(form, threadID, messageAndOTID, callback, isGroup) {
     if (getType(threadID) === "Array") return sendContent(form, threadID, false, messageAndOTID, callback);
-    if (getType(isGroup) !== "Boolean") return sendContent(form, threadID, String(threadID).length === 15, messageAndOTID, callback);
-    return sendContent(form, threadID, !isGroup, messageAndOTID, callback);
+    if (getType(isGroup) === "Boolean") return sendContent(form, threadID, !isGroup, messageAndOTID, callback);
+    sendOnce(form, threadID, false)
+      .then(info => callback(null, info))
+      .catch(() => {
+        sendOnce(form, threadID, true)
+          .then(info => callback(null, info))
+          .catch(err => callback(err));
+      });
   }
 
   function handleUrl(msg, form, callback, cb) {
@@ -362,5 +376,4 @@ module.exports = function (defaultFuncs, api, ctx) {
     );
     return returnPromise;
   };
-
 };
