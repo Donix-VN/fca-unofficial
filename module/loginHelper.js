@@ -298,7 +298,7 @@ async function tokens(username, password, twofactor = null) {
       return { status: false, message: "Please provide the 2FA secret!" };
     }
     try {
-      const dataErr = e && e.data && e.data.error && e.data.error.error_data ? e.data.error.error_data : {};
+      const dataErr = e && e.data && e.data.error && e.data.error.error_data ? e.data.error_data : {};
       const codeTotp = await genTotp(config.credentials.twofactor);
       logger(`AUTO-LOGIN: Performing 2FA ${mask(codeTotp, 2)}`, "info");
       const form2 = { ...baseForm, twofactor_code: codeTotp, encrypted_msisdn: "", userid: dataErr.uid || "", machine_id: dataErr.machine_id || baseForm.machine_id, first_factor: dataErr.login_first_factor || "", credentials_type: "two_factor" };
@@ -355,7 +355,7 @@ async function hydrateJarFromDB(userID) {
   }
 }
 
-async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) {
+async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, ctxRef) {
   const getUID = cs =>
     cs.find(c => c.key === "i_user")?.value ||
     cs.find(c => c.key === "c_user")?.value ||
@@ -366,7 +366,8 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) 
   const hydrated = await hydrateJarFromDB(null);
   if (hydrated) {
     logger("AppState backup live — proceeding to login", "info");
-    const resB = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+    const initial = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+    const resB = (await ctxRef.bypassAutomation(initial, jar)) || initial;
     const htmlB = resB && resB.data ? resB.data : "";
     if (htmlB.includes("/checkpoint/block/?next")) throw new Error("Checkpoint");
     const cookiesB = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
@@ -383,7 +384,8 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions) 
   if (!(r && r.status && Array.isArray(r.cookies))) throw new Error(r && r.message ? r.message : "Login failed");
   const pairs = r.cookies.map(c => `${c.key || c.name}=${c.value}`);
   setJarFromPairs(jar, pairs, ".facebook.com");
-  const res2 = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+  const initial2 = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+  const res2 = (await ctxRef.bypassAutomation(initial2, jar)) || initial2;
   const html2 = res2 && res2.data ? res2.data : "";
   if (html2.includes("/checkpoint/block/?next")) throw new Error("Checkpoint");
   const cookies2 = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
@@ -447,13 +449,67 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       return callback(e);
     }
     (async () => {
+      const ctx = { globalOptions, options: globalOptions, reconnectAttempts: 0 };
+      ctx.bypassAutomation = async function (resp, j) {
+        global.fca = global.fca || {};
+        global.fca.BypassAutomationNotification = this.bypassAutomation.bind(this);
+        const s = x => (typeof x === "string" ? x : String(x ?? ""));
+        const u = r => r?.request?.res?.responseUrl || (r?.config?.baseURL ? new URL(r.config.url || "/", r.config.baseURL).toString() : r?.config?.url || "");
+        const isCp = r => typeof u(r) === "string" && u(r).includes("checkpoint/601051028565049");
+        const cookieUID = async () => {
+          try {
+            const cookies = typeof j?.getCookies === "function" ? await j.getCookies("https://www.facebook.com") : [];
+            return cookies.find(c => c.key === "i_user")?.value || cookies.find(c => c.key === "c_user")?.value;
+          } catch { return undefined; }
+        };
+        const htmlUID = body => s(body).match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s(body).match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1];
+        const getUID = async body => (await cookieUID()) || htmlUID(body);
+        const refreshJar = async () => get("https://www.facebook.com/", j, null, this.options).then(saveCookies(j));
+        const bypass = async body => {
+          const b = s(body);
+          const UID = await getUID(b);
+          const fb_dtsg = getFrom(b, '"DTSGInitData",[],{"token":"', '",') || b.match(/name="fb_dtsg"\s+value="([^"]+)"/)?.[1];
+          const jazoest = getFrom(b, 'name="jazoest" value="', '"') || getFrom(b, "jazoest=", '",') || b.match(/name="jazoest"\s+value="([^"]+)"/)?.[1];
+          const lsd = getFrom(b, '["LSD",[],{"token":"', '"}') || b.match(/name="lsd"\s+value="([^"]+)"/)?.[1];
+          const form = { av: UID, fb_dtsg, jazoest, lsd, fb_api_caller_class: "RelayModern", fb_api_req_friendly_name: "FBScrapingWarningMutation", variables: "{}", server_timestamps: true, doc_id: 6339492849481770 };
+          await post("https://www.facebook.com/api/graphql/", j, form, null, this.options).then(saveCookies(j));
+          logger("Facebook automation warning detected, handling...", "warn");
+          this.reconnectAttempts = 0;
+        };
+        try {
+          if (resp) {
+            if (isCp(resp)) {
+              await bypass(s(resp.data));
+              const refreshed = await refreshJar();
+              if (isCp(refreshed)) logger("Checkpoint still present after refresh", "warn");
+              else logger("Bypass complete, cookies refreshed", "info");
+              return refreshed;
+            }
+            return resp;
+          }
+          const first = await get("https://www.facebook.com/", j, null, this.options).then(saveCookies(j));
+          if (isCp(first)) {
+            await bypass(s(first.data));
+            const refreshed = await refreshJar();
+            if (!isCp(refreshed)) logger("Bypass complete, cookies refreshed", "info");
+            else logger("Checkpoint still present after refresh", "warn");
+            return refreshed;
+          }
+          return first;
+        } catch (e) {
+          logger(`Bypass automation error: ${e && e.message ? e.message : String(e)}`, "error");
+          return resp;
+        }
+      };
       if (appState || Cookie) {
-        return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+        const initial = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+        return (await ctx.bypassAutomation(initial, jar)) || initial;
       }
       const hydrated = await hydrateJarFromDB(null);
       if (hydrated) {
         logger("AppState backup live — proceeding to login", "info");
-        return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+        const initial = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+        return (await ctx.bypassAutomation(initial, jar)) || initial;
       }
       logger("AppState backup die — proceeding to email/password login", "warn");
       return get("https://www.facebook.com/", null, null, globalOptions)
@@ -464,7 +520,48 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         });
     })()
       .then(async function (res) {
-        let html = res && res.data ? res.data : "";
+        const ctx = {};
+        ctx.options = globalOptions;
+        ctx.bypassAutomation = async function (resp, j) {
+          global.fca = global.fca || {};
+          global.fca.BypassAutomationNotification = this.bypassAutomation.bind(this);
+          const s = x => (typeof x === "string" ? x : String(x ?? ""));
+          const u = r => r?.request?.res?.responseUrl || (r?.config?.baseURL ? new URL(r.config.url || "/", r.config.baseURL).toString() : r?.config?.url || "");
+          const isCp = r => typeof u(r) === "string" && u(r).includes("checkpoint/601051028565049");
+          const cookieUID = async () => {
+            try {
+              const cookies = typeof j?.getCookies === "function" ? await j.getCookies("https://www.facebook.com") : [];
+              return cookies.find(c => c.key === "i_user")?.value || cookies.find(c => c.key === "c_user")?.value;
+            } catch { return undefined; }
+          };
+          const htmlUID = body => s(body).match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s(body).match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1];
+          const getUID = async body => (await cookieUID()) || htmlUID(body);
+          const refreshJar = async () => get("https://www.facebook.com/", j, null, this.options).then(saveCookies(j));
+          const bypass = async body => {
+            const b = s(body);
+            const UID = await getUID(b);
+            const fb_dtsg = getFrom(b, '"DTSGInitData",[],{"token":"', '",') || b.match(/name="fb_dtsg"\s+value="([^"]+)"/)?.[1];
+            const jazoest = getFrom(b, 'name="jazoest" value="', '"') || getFrom(b, "jazoest=", '",') || b.match(/name="jazoest"\s+value="([^"]+)"/)?.[1];
+            const lsd = getFrom(b, '["LSD",[],{"token":"', '"}') || b.match(/name="lsd"\s+value="([^"]+)"/)?.[1];
+            const form = { av: UID, fb_dtsg, jazoest, lsd, fb_api_caller_class: "RelayModern", fb_api_req_friendly_name: "FBScrapingWarningMutation", variables: "{}", server_timestamps: true, doc_id: 6339492849481770 };
+            await post("https://www.facebook.com/api/graphql/", j, form, null, this.options).then(saveCookies(j));
+            logger("Facebook automation warning detected, handling...", "warn");
+          };
+          try {
+            if (res && isCp(res)) {
+              await bypass(s(res.data));
+              const refreshed = await refreshJar();
+              if (!isCp(refreshed)) logger("Bypass complete, cookies refreshed", "info");
+              return refreshed;
+            }
+            logger("No checkpoint detected", "info");
+            return res;
+          } catch {
+            return res;
+          }
+        };
+        const processed = (await ctx.bypassAutomation(res, jar)) || res;
+        let html = processed && processed.data ? processed.data : "";
         let cookies = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
         let userID =
           cookies.find(c => c.key === "i_user")?.value ||
@@ -472,7 +569,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           cookies.find(c => c.name === "i_user")?.value ||
           cookies.find(c => c.name === "c_user")?.value;
         if (!userID) {
-          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions);
+          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx);
           html = retried.html;
           cookies = retried.cookies;
           userID = retried.userID;
@@ -527,7 +624,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
             console.error("Database connection failed:", error && error.message ? error.message : String(error));
           });
         logger("FCA fix/update by DongDev (Donix-VN)", "info");
-        const ctx = {
+        const ctxMain = {
           userID,
           jar,
           globalOptions,
@@ -547,7 +644,9 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           wsTaskNumber: 0,
           tasks: new Map()
         };
-        ctx.performAutoLogin = async () => {
+        ctxMain.options = globalOptions;
+        ctxMain.bypassAutomation = ctx.bypassAutomation.bind(ctxMain);
+        ctxMain.performAutoLogin = async () => {
           try {
             const u = config.credentials?.email || email;
             const p = config.credentials?.password || password;
@@ -579,7 +678,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
             return await getLatestBackup(uid, "cookie");
           }
         };
-        const defaultFuncs = makeDefaults(html, userID, ctx);
+        const defaultFuncs = makeDefaults(html, userID, ctxMain);
         const srcRoot = path.join(__dirname, "../src/api");
         let loaded = 0;
         let skipped = 0;
@@ -594,7 +693,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
               skipped++;
               return;
             }
-            api[key] = require(p)(defaultFuncs, api, ctx);
+            api[key] = require(p)(defaultFuncs, api, ctxMain);
             loaded++;
           });
         });
