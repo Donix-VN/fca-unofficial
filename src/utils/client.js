@@ -99,10 +99,10 @@ function parseAndCheckLogin(ctx, http, retryCount = 0) {
       throw e;
     }
     ctx.auto_login = true;
-    logL("Phiên đăng nhập hết hạn", "warn");
+    logger("Login session expired", "warn");
     const ok = await ctx.performAutoLogin();
     if (ok) {
-      logL("Auto login successful! Restarting...", "AUTO-LOGIN");
+      logger("Auto login successful! Restarting...");
       ctx.auto_login = false;
       process.exit(1);
     } else {
