@@ -1,6 +1,6 @@
 "use strict";
 const { formatID } = require("../../../utils/format");
-
+const uuid = require("uuid");
 "use strict";
 module.exports = function createListenMqtt(deps) {
   const { WebSocket, mqtt, HttpsProxyAgent, buildStream, buildProxy,
@@ -25,18 +25,17 @@ module.exports = function createListenMqtt(deps) {
 
     const chatOn = ctx.globalOptions.online;
     const sessionID = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) + 1;
-    const GUID = utils.getGUID();
     const username = {
-      u: ctx.userID, s: sessionID, chat_on: chatOn, fg: false, d: GUID,
+      u: ctx.userID, s: sessionID, chat_on: chatOn, fg: false, d: ctx.clientId,
       ct: "websocket", aid: 219994525426954, aids: null, mqtt_sid: "",
       cp: 3, ecp: 10, st: [], pm: [], dc: "", no_auto_fg: true, gas: null, pack: [], p: null, php_override: ""
     };
 
     const cookies = api.getCookies();
     let host;
-    if (ctx.mqttEndpoint) host = `${ctx.mqttEndpoint}&sid=${sessionID}&cid=${GUID}`;
+    if (ctx.mqttEndpoint) host = `${ctx.mqttEndpoint}&sid=${sessionID}&cid=${ctx.clientId}`;
     else if (ctx.region) host = `wss://edge-chat.facebook.com/chat?region=${ctx.region.toLowerCase()}&sid=${sessionID}&cid=${ctx.clientId}`;
-    else host = `wss://edge-chat.facebook.com/chat?sid=${sessionID}&cid=${GUID}`;
+    else host = `wss://edge-chat.facebook.com/chat?sid=${sessionID}&cid=${ctx.clientId}`;
 
     const options = {
       clientId: "mqttwsclient",
