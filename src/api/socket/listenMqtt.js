@@ -12,9 +12,11 @@ const createListenMqtt = require("./core/connectMqtt");
 const createGetSeqID = require("./core/getSeqID");
 const markDelivery = require("./core/markDelivery");
 const getTaskResponseData = require("./core/getTaskResponseData");
+const createEmitAuth = require("./core/emitAuth");
 const parseDelta = createParseDelta({ markDelivery, parseAndCheckLogin });
 const listenMqtt = createListenMqtt({ WebSocket, mqtt, HttpsProxyAgent, buildStream, buildProxy, topics, parseDelta, getTaskResponseData, logger });
 const getSeqIDFactory = createGetSeqID({ parseAndCheckLogin, listenMqtt, logger });
+const emitAuth = createEmitAuth({ logger });
 
 const MQTT_DEFAULTS = { cycleMs: 60 * 60 * 1000, reconnectDelayMs: 2000, autoReconnect: true, reconnectAfterStop: false };
 function mqttConf(ctx, overrides) {
@@ -26,6 +28,33 @@ function mqttConf(ctx, overrides) {
 module.exports = function (defaultFuncs, api, ctx, opts) {
   const identity = function () { };
   let globalCallback = identity;
+
+  function installPostGuard() {
+    if (ctx._postGuarded) return defaultFuncs.post;
+    const rawPost = defaultFuncs.post && defaultFuncs.post.bind(defaultFuncs);
+    if (!rawPost) return defaultFuncs.post;
+
+    function postSafe(...args) {
+      return rawPost(...args).catch(err => {
+        const msg = (err && err.error) || (err && err.message) || String(err || "");
+        if (/Not logged in|blocked the login/i.test(msg)) {
+          emitAuth(
+            ctx,
+            api,
+            globalCallback,
+            /blocked/i.test(msg) ? "login_blocked" : "not_logged_in",
+            msg
+          );
+        }
+        throw err;
+      });
+    }
+    defaultFuncs.post = postSafe;
+    ctx._postGuarded = true;
+    logger("postSafe guard installed for defaultFuncs.post", "info");
+    return postSafe;
+  }
+
   let conf = mqttConf(ctx, opts);
 
   function getSeqIDWrapper() {
@@ -34,7 +63,10 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
       queries: JSON.stringify({
         o0: {
           doc_id: "3336396659757871",
-          query_params: { limit: 1, before: null, tags: ["INBOX"], includeDeliveryReceipts: false, includeSeqID: true }
+          query_params: {
+            limit: 1, before: null, tags: ["INBOX"],
+            includeDeliveryReceipts: false, includeSeqID: true
+          }
         }
       })
     };
@@ -85,7 +117,7 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
   }
 
   function forceCycle() {
-    if (ctx._cycling) return;           // đừng cycle chồng
+    if (ctx._cycling) return;
     ctx._cycling = true;
     ctx._ending = true;
     logger("mqtt force cycle begin", "warn");
@@ -119,12 +151,16 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
     }
 
     const msgEmitter = new MessageEmitter();
+
     globalCallback = callback || function (error, message) {
       if (error) { logger("mqtt emit error", "error"); return msgEmitter.emit("error", error); }
       msgEmitter.emit("message", message);
     };
 
     conf = mqttConf(ctx, conf);
+
+    installPostGuard();
+
     if (!ctx.firstListen) ctx.lastSeqId = null;
     ctx.syncToken = undefined;
     ctx.t_mqttCalled = false;

@@ -80,23 +80,30 @@ module.exports = function createListenMqtt(deps) {
     const mqttClient = ctx.mqttClient;
     global.mqttClient = mqttClient;
 
-
     mqttClient.on("error", function (err) {
       const msg = String(err && err.message ? err.message : err || "");
-
-      if ((ctx._ending || ctx._cycling) && isEndingLikeError(msg)) {
+      if ((ctx._ending || ctx._cycling) && /No subscription existed|client disconnecting/i.test(msg)) {
         logger(`mqtt expected during shutdown: ${msg}`, "info");
         return;
+      }
+
+      if (/Not logged in|Not logged in.|blocked the login|401|403/i.test(msg)) {
+        try { mqttClient.end(true); } catch (_) { }
+        return emitAuth(ctx, api, globalCallback,
+          /blocked/i.test(msg) ? "login_blocked" : "not_logged_in",
+          msg
+        );
       }
       logger(`mqtt error: ${msg}`, "error");
       try { mqttClient.end(true); } catch (_) { }
       if (ctx._ending || ctx._cycling) return;
 
       if (ctx.globalOptions.autoReconnect) {
-        scheduleReconnect();
+        const d = (ctx._mqttOpt && ctx._mqttOpt.reconnectDelayMs) || 2000;
+        logger(`mqtt autoReconnect listenMqtt() in ${d}ms`, "warn");
+        setTimeout(() => listenMqtt(defaultFuncs, api, ctx, globalCallback), d);
       } else {
-
-        globalCallback({ type: "stop_listen", error: msg || "Connection refused: Server unavailable" }, null);
+        globalCallback({ type: "stop_listen", error: msg || "Connection refused" }, null);
       }
     });
 

@@ -1,5 +1,3 @@
-"use strict";
-
 const fs = require("fs");
 const path = require("path");
 const logger = require("../../../func/logger");
@@ -122,6 +120,8 @@ let isProcessingQueue = false;
 const processingThreads = new Set();
 const queuedThreads = new Set();
 const cooldown = new Map();
+const inflight = new Map();
+let loopStarted = false;
 
 module.exports = function (defaultFuncs, api, ctx) {
   const getMultiInfo = async function (threadIDs) {
@@ -204,6 +204,17 @@ module.exports = function (defaultFuncs, api, ctx) {
     }
   }
 
+  async function createOrUpdateThread(id, data) {
+    const existing = await get(id);
+    if (existing) {
+      await update(id, { data });
+      return "update";
+    } else {
+      await create(id, { data });
+      return "create";
+    }
+  }
+
   async function fetchThreadInfo(tID, isNew) {
     try {
       const response = await getMultiInfo([tID]);
@@ -214,13 +225,8 @@ module.exports = function (defaultFuncs, api, ctx) {
       }
       const threadInfo = response.Data[0];
       await upsertUsersFromThreadInfo(threadInfo);
-      if (isNew) {
-        await create(tID, { data: threadInfo });
-        logger(`Success create data thread: ${tID}`, "info");
-      } else {
-        await update(tID, { data: threadInfo });
-        logger(`Success update data thread: ${tID}`, "info");
-      }
+      const op = await createOrUpdateThread(tID, threadInfo);
+      logger(`${op === "create" ? "Success create data thread" : "Success update data thread"}: ${tID}`, "info");
     } catch (err) {
       cooldown.set(tID, Date.now() + 5 * 60 * 1000);
       logger(`fetchThreadInfo error ${tID}: ${err?.message || err}`, "error");
@@ -242,7 +248,6 @@ module.exports = function (defaultFuncs, api, ctx) {
         const lastUpdated = new Date(result.updatedAt).getTime();
         if ((now - lastUpdated) / (1000 * 60) > 10 && !queuedThreads.has(t)) {
           queuedThreads.add(t);
-          logger(`ThreadID ${t} queued for refresh`, "info");
           queue.push(() => fetchThreadInfo(t, false));
         }
       }
@@ -265,10 +270,13 @@ module.exports = function (defaultFuncs, api, ctx) {
     isProcessingQueue = false;
   }
 
-  setInterval(() => {
-    checkAndUpdateThreads();
-    processQueue();
-  }, 10000);
+  if (!loopStarted) {
+    loopStarted = true;
+    setInterval(() => {
+      checkAndUpdateThreads();
+      processQueue();
+    }, 10000);
+  }
 
   return async function getThreadInfoGraphQL(threadID, callback) {
     let resolveFunc = function () { };
@@ -284,25 +292,89 @@ module.exports = function (defaultFuncs, api, ctx) {
       };
     }
     if (getType(threadID) !== "Array") threadID = [threadID];
+    const tid = String(threadID[0]);
     try {
-      const cached = await get(threadID[0]);
+      const cd = cooldown.get(tid);
+      if (cd && Date.now() < cd) {
+        const cachedCd = await get(tid);
+        if (cachedCd?.data && isValidThread(cachedCd.data)) {
+          await upsertUsersFromThreadInfo(cachedCd.data);
+          callback(null, cachedCd.data);
+          return returnPromise;
+        }
+        const stub = {
+          threadID: tid,
+          threadName: null,
+          participantIDs: [],
+          userInfo: [],
+          unreadCount: 0,
+          messageCount: 0,
+          timestamp: null,
+          muteUntil: null,
+          isGroup: false,
+          isSubscribed: false,
+          isArchived: false,
+          folder: null,
+          cannotReplyReason: null,
+          eventReminders: [],
+          emoji: null,
+          color: null,
+          threadTheme: null,
+          nicknames: {},
+          adminIDs: [],
+          approvalMode: false,
+          approvalQueue: [],
+          reactionsMuteMode: "",
+          mentionsMuteMode: "",
+          isPinProtected: false,
+          relatedPageThread: null,
+          name: null,
+          snippet: null,
+          snippetSender: null,
+          snippetAttachments: [],
+          serverTimestamp: null,
+          imageSrc: null,
+          isCanonicalUser: false,
+          isCanonical: true,
+          recipientsLoadable: false,
+          hasEmailParticipant: false,
+          readOnly: false,
+          canReply: false,
+          lastMessageTimestamp: null,
+          lastMessageType: "message",
+          lastReadTimestamp: null,
+          threadType: 1,
+          inviteLink: { enable: false, link: null },
+          __status: "cooldown",
+        };
+        await createOrUpdateThread(tid, stub);
+        callback(null, stub);
+        return returnPromise;
+      }
+
+      const cached = await get(tid);
       if (cached?.data && isValidThread(cached.data)) {
         await upsertUsersFromThreadInfo(cached.data);
         callback(null, cached.data);
         return returnPromise;
       }
-      if (!processingThreads.has(threadID[0])) {
-        processingThreads.add(threadID[0]);
-        logger(`Created new thread data: ${threadID[0]}`, "info");
-        const response = await getMultiInfo(threadID);
+
+      if (inflight.has(tid)) {
+        inflight.get(tid).then(data => callback(null, data)).catch(err => callback(err));
+        return returnPromise;
+      }
+
+      const p = (async () => {
+        processingThreads.add(tid);
+        const response = await getMultiInfo([tid]);
         if (response.Success && response.Data && isValidThread(response.Data[0])) {
           const data = response.Data[0];
           await upsertUsersFromThreadInfo(data);
-          await create(threadID[0], { data });
-          callback(null, data);
+          await createOrUpdateThread(tid, data);
+          return data;
         } else {
           const stub = {
-            threadID: threadID[0],
+            threadID: tid,
             threadName: null,
             participantIDs: [],
             userInfo: [],
@@ -346,11 +418,18 @@ module.exports = function (defaultFuncs, api, ctx) {
             inviteLink: { enable: false, link: null },
             __status: "unavailable",
           };
-          cooldown.set(threadID[0], Date.now() + 5 * 60 * 1000);
-          callback(null, stub);
+          cooldown.set(tid, Date.now() + 5 * 60 * 1000);
+          await createOrUpdateThread(tid, stub);
+          return stub;
         }
-        processingThreads.delete(threadID[0]);
-      }
+      })()
+        .finally(() => {
+          processingThreads.delete(tid);
+          inflight.delete(tid);
+        });
+
+      inflight.set(tid, p);
+      p.then(data => callback(null, data)).catch(err => callback(err));
     } catch (err) {
       callback(err);
     }

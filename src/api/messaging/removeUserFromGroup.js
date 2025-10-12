@@ -1,6 +1,7 @@
 "use strict";
 
-const { parseAndCheckLogin, getType } = require("../../utils/format");
+const { getType } = require("../../utils/format");
+const { parseAndCheckLogin } = require("../../utils/client");
 const log = require("npmlog");
 
 module.exports = function (defaultFuncs, api, ctx) {

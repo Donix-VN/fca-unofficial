@@ -107,3 +107,6 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 
 ## v2.0.23 - 2025-10-11
 - Hotfix / auto bump
+
+## v2.0.24 - 2025-10-11
+- Hotfix / auto bump
