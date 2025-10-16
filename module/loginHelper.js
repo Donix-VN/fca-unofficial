@@ -1,3 +1,4 @@
+"use strict";
 const fs = require("fs");
 const path = require("path");
 const models = require("../src/database/models");
@@ -230,6 +231,10 @@ async function backupAppStateSQL(j, userID) {
     const ck = cookieHeaderFromJar(j);
     await upsertBackup(Model, userID, "appstate", JSON.stringify(appJson));
     await upsertBackup(Model, userID, "cookie", ck);
+    try {
+      const out = path.join(process.cwd(), "appstate.json");
+      fs.writeFileSync(out, JSON.stringify(appJson, null, 2));
+    } catch { }
     logger("Backup stored (overwrite mode)", "info");
   } catch (e) {
     logger(`Failed to save appstate backup ${e && e.message ? e.message : String(e)}`, "warn");
@@ -258,66 +263,171 @@ async function getLatestBackupAny(type) {
   }
 }
 
+const MESSENGER_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PQ3A.190605.003) [FBAN/Orca-Android;FBAV/391.2.0.20.404;FBPN/com.facebook.orca;FBLC/vi_VN;FBBV/437533963;FBCR/Viettel Telecom;FBMF/asus;FBBD/asus;FBDV/ASUS_Z01QD;FBSV/9;FBCA/x86:armeabi-v7a;FBDM/{density=1.5,width=1600,height=900};FB_FW/1;]";
+
+function encodesig(obj) {
+  let data = "";
+  Object.keys(obj).forEach(k => { data += `${k}=${obj[k]}`; });
+  return md5(data + "62f8ce9f74b12f84c123cc23437a4a32");
+}
+
+function sort(obj) {
+  const keys = Object.keys(obj).sort();
+  const out = {};
+  for (const k of keys) out[k] = obj[k];
+  return out;
+}
+
+async function setJarCookies(j, appstate) {
+  const tasks = [];
+  for (const c of appstate) {
+    const dom = (c.domain || ".facebook.com").replace(/^\./, "");
+    const path = c.path || "/";
+    const base1 = `https://${dom}${path}`;
+    const base2 = `https://www.${dom}${path}`;
+    const str = `${c.key}=${c.value}; Domain=${c.domain || ".facebook.com"}; Path=${path};`;
+    tasks.push(j.setCookie(str, base1));
+    tasks.push(j.setCookie(str, base2));
+  }
+  await Promise.all(tasks);
+}
+
+async function loginViaGraph(username, password, twofactorSecretOrCode, i_user, externalJar) {
+  const cookieJar = externalJar instanceof CookieJar ? externalJar : new CookieJar();
+  const client = wrapper(axiosBase.create({ jar: cookieJar, withCredentials: true, timeout: 30000, validateStatus: () => true }));
+  const device_id = uuidv4();
+  const family_device_id = device_id;
+  const machine_id = randomString(24);
+  const base = {
+    adid: "00000000-0000-0000-0000-000000000000",
+    format: "json",
+    device_id,
+    email: username,
+    password,
+    generate_analytics_claim: "1",
+    community_id: "",
+    cpl: "true",
+    try_num: "1",
+    family_device_id,
+    secure_family_device_id: "",
+    credentials_type: "password",
+    enroll_misauth: "false",
+    generate_session_cookies: "1",
+    source: "login",
+    generate_machine_id: "1",
+    jazoest: "22297",
+    meta_inf_fbmeta: "NO_FILE",
+    advertiser_id: "00000000-0000-0000-0000-000000000000",
+    currently_logged_in_userid: "0",
+    locale: "vi_VN",
+    client_country_code: "VN",
+    fb_api_req_friendly_name: "authenticate",
+    fb_api_caller_class: "AuthOperations$PasswordAuthOperation",
+    api_key: "256002347743983",
+    access_token: "256002347743983|374e60f8b9bb6b8cbb30f78030438895"
+  };
+  const headers = {
+    "User-Agent": MESSENGER_USER_AGENT,
+    "Accept-Encoding": "gzip, deflate",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "x-fb-connection-quality": "EXCELLENT",
+    "x-fb-sim-hni": "45204",
+    "x-fb-net-hni": "45204",
+    "x-fb-connection-type": "WIFI",
+    "x-tigon-is-retry": "False",
+    "x-fb-friendly-name": "authenticate",
+    "x-fb-request-analytics-tags": '{"network_tags":{"retry_attempt":"0"},"application_tags":"unknown"}',
+    "x-fb-http-engine": "Liger",
+    "x-fb-client-ip": "True",
+    "x-fb-server-cluster": "True",
+    authorization: `OAuth ${base.access_token}`
+  };
+  const form1 = { ...base };
+  form1.sig = encodesig(sort(form1));
+  const res1 = await client.request({ url: "https://b-graph.facebook.com/auth/login", method: "post", data: qs.stringify(form1), headers });
+  if (res1.status === 200 && res1.data && res1.data.session_cookies) {
+    const appstate = res1.data.session_cookies.map(c => ({ key: c.name, value: c.value, domain: c.domain, path: c.path }));
+    const cUserCookie = appstate.find(c => c.key === "c_user");
+    if (i_user) appstate.push({ key: "i_user", value: i_user, domain: ".facebook.com", path: "/" });
+    else if (cUserCookie) appstate.push({ key: "i_user", value: cUserCookie.value, domain: ".facebook.com", path: "/" });
+    await setJarCookies(cookieJar, appstate);
+    let eaau = null;
+    let eaad6v7 = null;
+    try {
+      const r1 = await client.request({ url: `https://api.facebook.com/method/auth.getSessionforApp?format=json&access_token=${res1.data.access_token}&new_app_id=350685531728`, method: "get", headers: { "user-agent": MESSENGER_USER_AGENT, "x-fb-connection-type": "WIFI", authorization: `OAuth ${res1.data.access_token}` } });
+      eaau = r1.data && r1.data.access_token ? r1.data.access_token : null;
+    } catch { }
+    try {
+      const r2 = await client.request({ url: `https://api.facebook.com/method/auth.getSessionforApp?format=json&access_token=${res1.data.access_token}&new_app_id=275254692598279`, method: "get", headers: { "user-agent": MESSENGER_USER_AGENT, "x-fb-connection-type": "WIFI", authorization: `OAuth ${res1.data.access_token}` } });
+      eaad6v7 = r2.data && r2.data.access_token ? r2.data.access_token : null;
+    } catch { }
+    return { ok: true, cookies: appstate.map(c => ({ key: c.key, value: c.value })), jar: cookieJar, access_token_mess: res1.data.access_token || null, access_token: eaau, access_token_eaad6v7: eaad6v7, uid: res1.data.uid || cUserCookie?.value || null, session_key: res1.data.session_key || null };
+  }
+  const err = res1 && res1.data && res1.data.error ? res1.data.error : {};
+  if (err && err.code === 406) {
+    const data = err.error_data || {};
+    let code = null;
+    if (twofactorSecretOrCode && /^\d{6}$/.test(String(twofactorSecretOrCode))) code = String(twofactorSecretOrCode);
+    else if (twofactorSecretOrCode) {
+      try {
+        const clean = decodeURI(twofactorSecretOrCode).replace(/\s+/g, "").toUpperCase();
+        const { otp } = await TOTP.generate(clean);
+        code = otp;
+      } catch { }
+    } else if (config.credentials?.twofactor) {
+      const { otp } = await TOTP.generate(String(config.credentials.twofactor).replace(/\s+/g, "").toUpperCase());
+      code = otp;
+    }
+    if (!code) return { ok: false, message: "2FA required" };
+    const form2 = {
+      ...base,
+      credentials_type: "two_factor",
+      twofactor_code: code,
+      userid: data.uid || username,
+      first_factor: data.login_first_factor || "",
+      machine_id: data.machine_id || machine_id
+    };
+    form2.sig = encodesig(sort(form2));
+    const res2 = await client.request({ url: "https://b-graph.facebook.com/auth/login", method: "post", data: qs.stringify(form2), headers });
+    if (res2.status === 200 && res2.data && res2.data.session_cookies) {
+      const appstate = res2.data.session_cookies.map(c => ({ key: c.name, value: c.value, domain: c.domain, path: c.path }));
+      const cUserCookie = appstate.find(c => c.key === "c_user");
+      if (i_user) appstate.push({ key: "i_user", value: i_user, domain: ".facebook.com", path: "/" });
+      else if (cUserCookie) appstate.push({ key: "i_user", value: cUserCookie.value, domain: ".facebook.com", path: "/" });
+      await setJarCookies(cookieJar, appstate);
+      let eaau = null;
+      let eaad6v7 = null;
+      try {
+        const r1 = await client.request({ url: `https://api.facebook.com/method/auth.getSessionforApp?format=json&access_token=${res2.data.access_token}&new_app_id=350685531728`, method: "get", headers: { "user-agent": MESSENGER_USER_AGENT, "x-fb-connection-type": "WIFI", authorization: `OAuth ${res2.data.access_token}` } });
+        eaau = r1.data && r1.data.access_token ? r1.data.access_token : null;
+      } catch { }
+      try {
+        const r2 = await client.request({ url: `https://api.facebook.com/method/auth.getSessionforApp?format=json&access_token=${res2.data.access_token}&new_app_id=275254692598279`, method: "get", headers: { "user-agent": MESSENGER_USER_AGENT, "x-fb-connection-type": "WIFI", authorization: `OAuth ${res2.data.access_token}` } });
+        eaad6v7 = r2.data && r2.data.access_token ? r2.data.access_token : null;
+      } catch { }
+      return { ok: true, cookies: appstate.map(c => ({ key: c.key, value: c.value })), jar: cookieJar, access_token_mess: res2.data.access_token || null, access_token: eaau, access_token_eaad6v7: eaad6v7, uid: res2.data.uid || cUserCookie?.value || null, session_key: res2.data.session_key || null };
+    }
+    return { ok: false, message: "2FA failed" };
+  }
+  return { ok: false, message: "Login failed" };
+}
+
 async function tokens(username, password, twofactor = null) {
   const t0 = process.hrtime.bigint();
-  if (!username || !password) {
-    logger("Missing email or password", "error");
-    return { status: false, message: "Please provide email and password" };
-  }
+  if (!username || !password) return { status: false, message: "Please provide email and password" };
   logger(`AUTO-LOGIN: Initialize login ${mask(username, 2)}`, "info");
-  const cj = new CookieJar();
-  const axios = wrapper(axiosBase.create({ jar: cj, withCredentials: true, validateStatus: () => true, timeout: 30000 }));
-  const loginUrl = "https://b-graph.facebook.com/auth/login";
-  const baseForm = { adid: uuidv4(), email: username, password: password, format: "json", device_id: uuidv4(), cpl: "true", family_device_id: uuidv4(), locale: "en_US", client_country_code: "US", credentials_type: "device_based_login_password", generate_session_cookies: "1", generate_analytics_claim: "1", generate_machine_id: "1", currently_logged_in_userid: "0", irisSeqID: 1, try_num: "1", enroll_misauth: "false", meta_inf_fbmeta: "", source: "login", machine_id: randomString(24), fb_api_req_friendly_name: "authenticate", fb_api_caller_class: "com.facebook.account.login.protocol.Fb4aAuthHandler", api_key: "882a8490361da98702bf97a021ddc14d", access_token: "350685531728%7C62f8ce9f74b12f84c123cc23437a4a32" };
-  try {
-    const form1 = { ...baseForm };
-    form1.sig = encodeSig(sortObject(form1));
-    logger("AUTO-LOGIN: Send login request", "info");
-    const r0 = process.hrtime.bigint();
-    const res1 = await axios.post(loginUrl, qs.stringify(form1), { headers: buildHeaders(loginUrl, { "x-fb-friendly-name": form1.fb_api_req_friendly_name }) });
-    const dt1 = Number(process.hrtime.bigint() - r0) / 1e6;
-    logger(`AUTO-LOGIN: Received response ${res1.status} ${Math.round(dt1)}ms`, "info");
-    if (res1.status >= 400) throw { response: res1 };
-    if (res1.data && res1.data.session_cookies) {
-      const cookies = res1.data.session_cookies.map(e => ({ key: e.name, value: e.value, domain: "facebook.com", path: e.path, hostOnly: false }));
-      logger(`AUTO-LOGIN: Login success (first attempt) ${cookies.length} cookies`, "info");
-      const t1 = Number(process.hrtime.bigint() - t0) / 1e6;
-      logger(`Done success login ${Math.round(t1)}ms`, "info");
-      return { status: true, cookies };
-    }
-    throw { response: res1 };
-  } catch (err) {
-    const e = err && err.response ? err.response : null;
-    const code = e && e.data && e.data.error ? e.data.error.code : null;
-    const message = e && e.data && e.data.error ? e.data.error.message : "";
-    if (code) logger(`AUTO-LOGIN: Error on request #1 ${code} ${message}`, "warn");
-    logger("AUTO-LOGIN: Processing twofactor...", "info");
-    if (code === 401) return { status: false, message: message || "Unauthorized" };
-    if (!config.credentials?.twofactor) {
-      logger("AUTO-LOGIN: 2FA required but secret missing", "warn");
-      return { status: false, message: "Please provide the 2FA secret!" };
-    }
-    try {
-      const dataErr = e && e.data && e.data.error && e.data.error.error_data ? e.data.error_data : {};
-      const codeTotp = await genTotp(config.credentials.twofactor);
-      logger(`AUTO-LOGIN: Performing 2FA ${mask(codeTotp, 2)}`, "info");
-      const form2 = { ...baseForm, twofactor_code: codeTotp, encrypted_msisdn: "", userid: dataErr.uid || "", machine_id: dataErr.machine_id || baseForm.machine_id, first_factor: dataErr.login_first_factor || "", credentials_type: "two_factor" };
-      form2.sig = encodeSig(sortObject(form2));
-      const r1 = process.hrtime.bigint();
-      const res2 = await axios.post(loginUrl, qs.stringify(form2), { headers: buildHeaders(loginUrl, { "x-fb-friendly-name": form2.fb_api_req_friendly_name }) });
-      const dt2 = Number(process.hrtime.bigint() - r1) / 1e6;
-      logger(`AUTO-LOGIN: Received 2FA response ${res2.status} ${Math.round(dt2)}ms`, "info");
-      if (res2.status >= 400 || !(res2.data && res2.data.session_cookies)) throw new Error("2FA failed");
-      const cookies = res2.data.session_cookies.map(e => ({ key: e.name, value: e.value, domain: "facebook.com", path: e.path, hostOnly: false }));
-      logger(`AUTO-LOGIN: Login success with 2FA ${cookies.length} cookies`, "info");
-      const t1 = Number(process.hrtime.bigint() - t0) / 1e6;
-      logger(`AUTO-LOGIN: Done success login with 2FA ${Math.round(t1)}ms`, "info");
-      return { status: true, cookies };
-    } catch {
-      logger("AUTO-LOGIN: 2FA failed", "error");
-      return { status: false, message: "Invalid two-factor code!" };
-    }
+  const res = await loginViaGraph(username, password, twofactor, null, jar);
+  if (res && res.ok && Array.isArray(res.cookies)) {
+    logger(`AUTO-LOGIN: Login success ${res.cookies.length} cookies`, "info");
+    const t1 = Number(process.hrtime.bigint() - t0) / 1e6;
+    logger(`Done success login ${Math.round(t1)}ms`, "info");
+    return { status: true, cookies: res.cookies };
   }
+  if (res && res.message === "2FA required") {
+    logger("AUTO-LOGIN: 2FA required but secret missing", "warn");
+    return { status: false, message: "Please provide the 2FA secret!" };
+  }
+  return { status: false, message: res && res.message ? res.message : "Login failed" };
 }
 
 async function hydrateJarFromDB(userID) {
