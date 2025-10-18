@@ -14,9 +14,12 @@ const markDelivery = require("./core/markDelivery");
 const getTaskResponseData = require("./core/getTaskResponseData");
 const createEmitAuth = require("./core/emitAuth");
 const parseDelta = createParseDelta({ markDelivery, parseAndCheckLogin });
-const listenMqtt = createListenMqtt({ WebSocket, mqtt, HttpsProxyAgent, buildStream, buildProxy, topics, parseDelta, getTaskResponseData, logger });
-const getSeqIDFactory = createGetSeqID({ parseAndCheckLogin, listenMqtt, logger });
+// Create emitAuth first so it can be injected into both factories
 const emitAuth = createEmitAuth({ logger });
+// Pass emitAuth into connectMqtt so errors there can signal auth state
+const listenMqtt = createListenMqtt({ WebSocket, mqtt, HttpsProxyAgent, buildStream, buildProxy, topics, parseDelta, getTaskResponseData, logger, emitAuth });
+// Inject emitAuth into getSeqID so its catch handler can notify properly
+const getSeqIDFactory = createGetSeqID({ parseAndCheckLogin, listenMqtt, logger, emitAuth });
 
 const MQTT_DEFAULTS = { cycleMs: 60 * 60 * 1000, reconnectDelayMs: 2000, autoReconnect: true, reconnectAfterStop: false };
 function mqttConf(ctx, overrides) {

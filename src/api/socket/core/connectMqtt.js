@@ -4,7 +4,7 @@ const uuid = require("uuid");
 "use strict";
 module.exports = function createListenMqtt(deps) {
   const { WebSocket, mqtt, HttpsProxyAgent, buildStream, buildProxy,
-    topics, parseDelta, getTaskResponseData, logger
+    topics, parseDelta, getTaskResponseData, logger, emitAuth
   } = deps;
 
   return function listenMqtt(defaultFuncs, api, ctx, globalCallback) {
