@@ -1,4 +1,4 @@
-// Origin: NOCOM-BOT/mod_fbmsg_legacy
+﻿// Origin: NOCOM-BOT/mod_fbmsg_legacy
 
 declare module '@dongdev/fca-unofficial' {
     import type { Readable, Duplex, Transform } from "stream";
@@ -8,25 +8,30 @@ declare module '@dongdev/fca-unofficial' {
     function login(credentials: Partial<{
         email: string,
         password: string,
-        appState: AppstateData
+        appState: AppstateData,
+        Cookie?: string | string[] | Record<string,string>
     }>, options: Partial<IFCAU_Options>, callback: (err: Error | null, api: IFCAU_API) => void): void;
     function login(credentials: Partial<{
         email: string,
         password: string,
-        appState: AppstateData
+        appState: AppstateData,
+        Cookie?: string | string[] | Record<string,string>
     }>, options: Partial<IFCAU_Options>): Promise<IFCAU_API>;
     function login(credentials: Partial<{
         email: string,
         password: string,
-        appState: AppstateData
+        appState: AppstateData,
+        Cookie?: string | string[] | Record<string,string>
     }>, callback: (err: Error | null, api: IFCAU_API) => void): void;
     function login(credentials: Partial<{
         email: string,
         password: string,
-        appState: AppstateData
+        appState: AppstateData,
+        Cookie?: string | string[] | Record<string,string>
     }>): Promise<IFCAU_API>;
 
     export default login;
+    export { login };
 
     export type Cookie = {
         key: string,
@@ -613,3 +618,5 @@ declare module '@dongdev/fca-unofficial' {
             name: string
         };
 }
+
+

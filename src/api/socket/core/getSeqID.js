@@ -25,7 +25,8 @@ module.exports = function createGetSeqID(deps) {
         }
       })
       .catch(err => {
-        const msg = (err && err.error) || (err && err.message) || String(err || "");
+        const detail = (err && err.detail && err.detail.message) ? ` | detail=${err.detail.message}` : "";
+        const msg = ((err && err.error) || (err && err.message) || String(err || "")) + detail;
         if (/Not logged in/i.test(msg)) {
           return emitAuth(ctx, api, globalCallback, "not_logged_in", msg);
         }

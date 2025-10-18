@@ -1,8 +1,16 @@
 {
   "name": "@dongdev/fca-unofficial",
-  "version": "2.0.27",
+  "version": "2.0.28",
   "description": "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
   "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./index.js",
+      "default": "./index.js",
+      "types": "./index.d.ts"
+    }
+  },
   "scripts": {
     "test": "mocha",
     "lint": "eslint .",
