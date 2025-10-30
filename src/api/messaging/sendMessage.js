@@ -1,379 +1,273 @@
-const fs = require("fs");
-const path = require("path");
-const { Readable } = require("stream");
+/**
+ * Create by Donix-VN (DongDev)
+ * Don't change credit
+ * Send a message using MQTT.
+ * @param {string} text - The text of the message to send.
+ * @param {string} threadID - The ID of the thread to send the message to.
+ * @param {string} [msgReplace] - Optional. The message ID of the message to replace.
+ * @param {Array<Buffer|Stream>} [attachments] - Optional. The attachments to send with the message.
+ * @param {function} [callback] - Optional. The callback function to call when the message is sent.
+ * @returns {Promise<object>} A promise that resolves with the bodies of the sent message.
+ */
+
+"use strict";
 const log = require("npmlog");
-const allowedProperties = {
-  attachment: true,
-  url: true,
-  sticker: true,
-  emoji: true,
-  emojiSize: true,
-  body: true,
-  mentions: true,
-  location: true,
-  asPage: true
-};
-const { isReadableStream } = require("../../utils/constants");
 const { parseAndCheckLogin } = require("../../utils/client");
-const { getType, generateThreadingID, generateTimestampRelative, generateOfflineThreadingID, getSignatureID } = require("../../utils/format");
+const { getType } = require("../../utils/format");
+const { isReadableStream } = require("../../utils/constants");
+const { generateOfflineThreadingID } = require("../../utils/format");
 
 module.exports = function (defaultFuncs, api, ctx) {
-  function toReadable(input) {
-    if (isReadableStream(input)) return input;
-    if (Buffer.isBuffer(input)) return Readable.from(input);
-    if (typeof input === "string" && fs.existsSync(input) && fs.statSync(input).isFile()) return fs.createReadStream(path.resolve(input));
-    throw { error: "Unsupported attachment input. Use stream/buffer/filepath." };
-  }
+  const hasLinks = s => typeof s === "string" && /(https?:\/\/|www\.|t\.me\/|fb\.me\/|youtu\.be\/|facebook\.com\/|youtube\.com\/)/i.test(s);
+  const emojiSizes = { small: 1, medium: 2, large: 3 };
 
-  function uploadAttachment(attachments, callback) {
-    const uploads = [];
-    for (let i = 0; i < attachments.length; i++) {
-      if (!isReadableStream(attachments[i])) throw { error: "Attachment should be a readable stream and not " + getType(attachments[i]) + "." };
-      const form = { upload_1024: attachments[i], voice_clip: "true" };
-      uploads.push(
-        defaultFuncs
-          .postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {}, {})
-          .then(parseAndCheckLogin(ctx, defaultFuncs))
-          .then(resData => {
-            if (resData.error) throw resData;
-            return resData.payload.metadata[0];
-          })
-      );
-    }
-    Promise.all(uploads)
-      .then(resData => callback(null, resData))
-      .catch(err => {
-        log.error("uploadAttachment", err);
-        callback(err);
-      });
-  }
-
-  function getUrl(url, callback) {
-    const form = { image_height: 960, image_width: 960, uri: url };
-    defaultFuncs
-      .post("https://www.facebook.com/message_share_attachment/fromURI/", ctx.jar, form)
-      .then(parseAndCheckLogin(ctx, defaultFuncs))
-      .then(resData => {
-        if (resData.error) return callback(resData);
-        if (!resData.payload) return callback({ error: "Invalid url" });
-        callback(null, resData.payload.share_data.share_params);
-      })
-      .catch(err => {
-        log.error("getUrl", err);
-        callback(err);
-      });
-  }
-
-  function sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
-  }
-
-  async function postWithRetry(url, jar, form, tries = 3) {
-    let lastErr;
-    for (let i = 0; i < tries; i++) {
-      try {
-        const res = await defaultFuncs.post(url, jar, form).then(parseAndCheckLogin(ctx, defaultFuncs));
-        if (res && !res.error) return res;
-        lastErr = res;
-        if (res && (res.error === 1545003 || res.error === 368)) await sleep(500 * (i + 1));
-        else break;
-      } catch (e) {
-        lastErr = e;
-        await sleep(500 * (i + 1));
-      }
-    }
-    throw lastErr || { error: "Send failed" };
-  }
-
-  function applyPageAuthor(form, msg) {
-    const pageID = msg && msg.asPage ? msg.asPage : ctx.globalOptions.pageID;
-    if (!pageID) return;
-    form["author"] = "fbid:" + pageID;
-    form["specific_to_list[1]"] = "fbid:" + pageID;
-    form["creator_info[creatorID]"] = ctx.userID;
-    form["creator_info[creatorType]"] = "direct_admin";
-    form["creator_info[labelType]"] = "sent_message";
-    form["creator_info[pageID]"] = pageID;
-    form["request_user_id"] = pageID;
-    form["creator_info[profileURI]"] = "https://www.facebook.com/profile.php?id=" + ctx.userID;
-  }
-
-  function applyMentions(msg, form) {
-    if (!msg.mentions || !msg.mentions.length) return;
-    let body = typeof msg.body === "string" ? msg.body : "";
-    const need = [];
-    for (const m of msg.mentions) {
-      const tag = String(m.tag || "");
-      if (tag && !body.includes(tag)) need.push(tag);
-    }
-    if (need.length) body = (body ? body + " " : "") + need.join(" ");
-    const emptyChar = "\u200E";
-    form["body"] = emptyChar + body;
-    let searchFrom = 0;
-    msg.mentions.forEach((m, i) => {
-      const tag = String(m.tag || "");
-      const from = typeof m.fromIndex === "number" ? m.fromIndex : searchFrom;
-      const off = Math.max(0, body.indexOf(tag, from));
-      form[`profile_xmd[${i}][offset]`] = off + 1;
-      form[`profile_xmd[${i}][length]`] = tag.length;
-      form[`profile_xmd[${i}][id]`] = m.id || 0;
-      form[`profile_xmd[${i}][type]`] = "p";
-      searchFrom = off + tag.length;
+  async function uploadAttachment(streams) {
+    const uploads = streams.map(stream => {
+      if (!isReadableStream(stream)) throw { error: "Attachment should be a readable stream and not " + getType(stream) + "." };
+      const form = { upload_1024: stream, voice_clip: "true" };
+      return defaultFuncs
+        .postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
+        .then(parseAndCheckLogin(ctx, defaultFuncs))
+        .then(resData => {
+          if (resData.error) throw resData;
+          return resData.payload.metadata[0];
+        });
     });
+    return Promise.all(uploads);
   }
 
-  function finalizeHasAttachment(form) {
-    const keys = ["image_ids", "gif_ids", "file_ids", "video_ids", "audio_ids", "sticker_id", "shareable_attachment[share_params]"];
-    form.has_attachment = keys.some(k => k in form && (Array.isArray(form[k]) ? form[k].length > 0 : !!form[k]));
-  }
-
-  function extractMessageInfo(resData, fallbackThreadID) {
+  function extractIdsFromPayload(payload) {
     let messageID = null;
-    let threadFBID = null;
-    let timestamp = null;
-    const actions = resData && resData.payload && Array.isArray(resData.payload.actions) ? resData.payload.actions : null;
-    if (actions && actions.length) {
-      const v = actions.find(x => x && x.message_id) || actions[0];
-      messageID = v && v.message_id ? v.message_id : null;
-      threadFBID = (v && (v.thread_fbid || v.thread_id)) || fallbackThreadID || null;
-      timestamp = v && v.timestamp ? v.timestamp : null;
-    }
-    if (!messageID) messageID = (resData && resData.payload && resData.payload.message_id) || resData.message_id || null;
-    if (!threadFBID) threadFBID = (resData && resData.payload && resData.payload.thread_id) || fallbackThreadID || null;
-    if (!timestamp) timestamp = (resData && resData.timestamp) || Date.now();
-    if (!messageID) return null;
-    return { threadID: threadFBID, messageID, timestamp };
-  }
-
-  function sendContent(form, threadID, isSingleUser, messageAndOTID, callback) {
-    if (getType(threadID) === "Array") {
-      for (let i = 0; i < threadID.length; i++) form["specific_to_list[" + i + "]"] = "fbid:" + threadID[i];
-      form["specific_to_list[" + threadID.length + "]"] = "fbid:" + ctx.userID;
-      form["client_thread_id"] = "root:" + messageAndOTID;
-    } else {
-      if (isSingleUser) {
-        form["specific_to_list[0]"] = "fbid:" + threadID;
-        form["specific_to_list[1]"] = "fbid:" + ctx.userID;
-        form["other_user_fbid"] = threadID;
-      } else {
-        form["thread_fbid"] = threadID;
+    let threadID = null;
+    function walk(n) {
+      if (Array.isArray(n)) {
+        if (n[0] === 5 && (n[1] === "replaceOptimsiticMessage" || n[1] === "replaceOptimisticMessage")) {
+          messageID = String(n[3]);
+        }
+        if (n[0] === 5 && n[1] === "writeCTAIdToThreadsTable") {
+          const a = n[2];
+          if (Array.isArray(a) && a[0] === 19) threadID = String(a[1]);
+        }
+        for (const x of n) walk(x);
       }
     }
-    postWithRetry("https://www.facebook.com/messaging/send/", ctx.jar, form)
-      .then(resData => {
-        if (!resData) return callback({ error: "Send message failed." });
-        if (resData.error) {
-          if (resData.error === 1545012) log.warn("sendMessage", "Got error 1545012. This might mean that you're not part of the conversation " + threadID);
-          else log.error("sendMessage", resData);
-          return callback(resData);
-        }
-        const info = extractMessageInfo(resData, getType(threadID) === "Array" ? null : String(threadID));
-        if (!info) return callback({ error: "Cannot parse message info." });
-        callback(null, info);
-      })
-      .catch(err => {
-        log.error("sendMessage", err);
-        if (getType(err) === "Object" && err.error === "Not logged in.") ctx.loggedIn = false;
-        callback(err);
-      });
+    walk(payload?.step);
+    return { threadID, messageID };
   }
 
-  function sendOnce(baseForm, threadID, isSingleUser) {
-    const otid = generateOfflineThreadingID();
-    const form = { ...baseForm, offline_threading_id: otid, message_id: otid };
+  function publishWithAck(content, text, reqID, callback) {
+    const mqttClient = ctx.mqttClient;
     return new Promise((resolve, reject) => {
-      sendContent(form, threadID, isSingleUser, otid, (err, info) => (err ? reject(err) : resolve(info)));
+      let done = false;
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        mqttClient.removeListener("message", handleRes);
+      };
+      const handleRes = (topic, message) => {
+        if (topic !== "/ls_resp") return;
+        let jsonMsg;
+        try {
+          jsonMsg = JSON.parse(message.toString());
+          jsonMsg.payload = JSON.parse(jsonMsg.payload);
+        } catch {
+          return;
+        }
+        if (jsonMsg.request_id !== reqID) return;
+        const { threadID, messageID } = extractIdsFromPayload(jsonMsg.payload);
+        const bodies = { body: text || null, messageID, threadID };
+        cleanup();
+        callback && callback(undefined, bodies);
+        resolve(bodies);
+      };
+      mqttClient.on("message", handleRes);
+      mqttClient.publish("/ls_req", JSON.stringify(content), { qos: 1, retain: false }, err => {
+        if (err) {
+          cleanup();
+          callback && callback(err);
+          reject(err);
+        }
+      });
+      setTimeout(() => {
+        if (done) return;
+        cleanup();
+        const err = { error: "Timeout waiting for ACK" };
+        callback && callback(err);
+        reject(err);
+      }, 15000);
     });
   }
 
-  function send(form, threadID, messageAndOTID, callback, isGroup) {
-    if (getType(threadID) === "Array") return sendContent(form, threadID, false, messageAndOTID, callback);
-    if (getType(isGroup) === "Boolean") return sendContent(form, threadID, !isGroup, messageAndOTID, callback);
-    sendOnce(form, threadID, false)
-      .then(info => callback(null, info))
-      .catch(() => {
-        sendOnce(form, threadID, true)
-          .then(info => callback(null, info))
-          .catch(err => callback(err));
-      });
-  }
-
-  function handleUrl(msg, form, callback, cb) {
-    if (msg.url) {
-      form["shareable_attachment[share_type]"] = "100";
-      getUrl(msg.url, function (err, params) {
-        if (err) return callback(err);
-        form["shareable_attachment[share_params]"] = params;
-        cb();
-      });
-    } else cb();
-  }
-
-  function handleLocation(msg, form, callback, cb) {
-    if (msg.location) {
-      if (msg.location.latitude == null || msg.location.longitude == null) return callback({ error: "location property needs both latitude and longitude" });
-      form["location_attachment[coordinates][latitude]"] = msg.location.latitude;
-      form["location_attachment[coordinates][longitude]"] = msg.location.longitude;
-      form["location_attachment[is_current_location]"] = !!msg.location.current;
-    }
-    cb();
-  }
-
-  function handleSticker(msg, form, callback, cb) {
-    if (msg.sticker) form["sticker_id"] = msg.sticker;
-    cb();
-  }
-
-  function handleEmoji(msg, form, callback, cb) {
-    if (msg.emojiSize != null && msg.emoji == null) return callback({ error: "emoji property is empty" });
-    if (msg.emoji) {
-      if (msg.emojiSize == null) msg.emojiSize = "medium";
-      if (msg.emojiSize !== "small" && msg.emojiSize !== "medium" && msg.emojiSize !== "large") return callback({ error: "emojiSize property is invalid" });
-      if (form["body"] != null && form["body"] !== "") return callback({ error: "body is not empty" });
-      form["body"] = msg.emoji;
-      form["tags[0]"] = "hot_emoji_size:" + msg.emojiSize;
-    }
-    cb();
-  }
-
-  function splitAttachments(list) {
-    if (!Array.isArray(list)) list = [list];
+  function buildMentionData(msg, baseBody) {
+    if (!msg.mentions || !Array.isArray(msg.mentions) || !msg.mentions.length) return null;
+    const base = typeof baseBody === "string" ? baseBody : "";
     const ids = [];
-    const streams = [];
-    for (const a of list) {
-      if (Array.isArray(a) && /_id$/.test(a[0])) {
-        ids.push([a[0], String(a[1])]);
-        continue;
+    const offsets = [];
+    const lengths = [];
+    const types = [];
+    let cursor = 0;
+    for (const m of msg.mentions) {
+      const raw = String(m.tag || "");
+      const name = raw.replace(/^@+/, "");
+      const start = Number.isInteger(m.fromIndex) ? m.fromIndex : cursor;
+      let idx = base.indexOf(raw, start);
+      let adj = 0;
+      if (idx === -1) {
+        idx = base.indexOf(name, start);
+        adj = 0;
+      } else {
+        adj = raw.length - name.length;
       }
-      if (a && typeof a === "object") {
-        if (a.id && a.type && /_id$/.test(a.type)) {
-          ids.push([a.type, String(a.id)]);
-          continue;
-        }
-        const k = Object.keys(a || {}).find(x => /_id$/.test(x));
-        if (k) {
-          ids.push([k, String(a[k])]);
-          continue;
-        }
+      if (idx < 0) {
+        idx = 0;
+        adj = 0;
       }
-      streams.push(toReadable(a));
+      const off = idx + adj;
+      ids.push(String(m.id || 0));
+      offsets.push(off);
+      lengths.push(name.length);
+      types.push("p");
+      cursor = off + name.length;
     }
-    return { ids, streams };
+    return {
+      mention_ids: ids.join(","),
+      mention_offsets: offsets.join(","),
+      mention_lengths: lengths.join(","),
+      mention_types: types.join(",")
+    };
   }
 
-  function handleAttachment(msg, form, callback, cb) {
-    if (!msg.attachment) return cb();
-    form["image_ids"] = [];
-    form["gif_ids"] = [];
-    form["file_ids"] = [];
-    form["video_ids"] = [];
-    form["audio_ids"] = [];
-    const { ids, streams } = splitAttachments(msg.attachment);
-    for (const [type, id] of ids) form[`${type}s`].push(id);
-    if (!streams.length) return cb();
-    uploadAttachment(streams, function (err, files) {
-      if (err) return callback(err);
-      files.forEach(function (file) {
-        const type = Object.keys(file)[0];
-        form[type + "s"].push(file[type]);
-      });
-      cb();
-    });
+  function coerceMsg(x) {
+    if (x == null) return { body: "" };
+    if (typeof x === "string") return { body: x };
+    if (typeof x === "object") return x;
+    return { body: String(x) };
   }
 
-  function handleMention(msg, form, callback, cb) {
-    try {
-      applyMentions(msg, form);
-      cb();
-    } catch (e) {
-      callback(e);
-    }
-  }
-
-  return function sendMessage(msg, threadID, callback, replyToMessage, isGroup) {
-    const isFn = v => typeof v === "function";
-    const isStr = v => typeof v === "string";
-
-    if (typeof isGroup === "undefined") isGroup = null;
-    if (!callback && (getType(threadID) === "Function" || getType(threadID) === "AsyncFunction")) return threadID({ error: "Pass a threadID as a second argument." });
-
-    if (isStr(callback) && isFn(replyToMessage)) {
-      const t = callback;
-      callback = replyToMessage;
-      replyToMessage = t;
-    } else if (!replyToMessage && isStr(callback)) {
+  return async function sendMessageMqtt(msg, threadID, callback, replyToMessage) {
+    if (typeof threadID === "function") return threadID({ error: "Pass a threadID as a second argument." });
+    if (typeof callback === "string" && !replyToMessage) {
       replyToMessage = callback;
-      callback = null;
+      callback = () => { };
+    }
+    if (typeof callback !== "function") callback = () => { };
+    if (!threadID) {
+      const err = { error: "threadID is required" };
+      callback(err);
+      throw err;
     }
 
-    let resolveFunc = function () { };
-    let rejectFunc = function () { };
-    const returnPromise = new Promise(function (resolve, reject) {
-      resolveFunc = resolve;
-      rejectFunc = reject;
-    });
-    if (!callback) {
-      callback = function (err, data) {
-        if (err) return rejectFunc(err);
-        resolveFunc(data);
+    const m = coerceMsg(msg);
+    const baseBody = m.body != null ? String(m.body) : "";
+    const reqID = Math.floor(100 + Math.random() * 900);
+    const epoch = (BigInt(Date.now()) << 22n).toString();
+
+    const payload0 = {
+      thread_id: String(threadID),
+      otid: generateOfflineThreadingID(),
+      source: 2097153,
+      send_type: 1,
+      sync_group: 1,
+      mark_thread_read: 1,
+      text: baseBody === "" ? null : baseBody,
+      initiating_source: 0,
+      skip_url_preview_gen: 0,
+      text_has_links: hasLinks(baseBody) ? 1 : 0,
+      multitab_env: 0,
+      metadata_dataclass: JSON.stringify({ media_accessibility_metadata: { alt_text: null } })
+    };
+
+    const mentionData = buildMentionData(m, baseBody);
+    if (mentionData) payload0.mention_data = mentionData;
+
+    if (m.sticker) {
+      payload0.send_type = 2;
+      payload0.sticker_id = m.sticker;
+    }
+
+    if (m.emoji) {
+      const size = !isNaN(m.emojiSize) ? Number(m.emojiSize) : emojiSizes[m.emojiSize || "small"] || 1;
+      payload0.send_type = 1;
+      payload0.text = m.emoji;
+      payload0.hot_emoji_size = Math.min(3, Math.max(1, size));
+    }
+
+    if (m.location && m.location.latitude != null && m.location.longitude != null) {
+      payload0.send_type = 1;
+      payload0.location_data = {
+        coordinates: { latitude: m.location.latitude, longitude: m.location.longitude },
+        is_current_location: !!m.location.current,
+        is_live_location: !!m.location.live
       };
     }
-    const msgType = getType(msg);
-    const threadIDType = getType(threadID);
-    const messageIDType = getType(replyToMessage);
-    if (msgType !== "String" && msgType !== "Object") return callback({ error: "Message should be of type string or object and not " + msgType + "." });
-    if (threadIDType !== "Array" && threadIDType !== "Number" && threadIDType !== "String") return callback({ error: "ThreadID should be of type number, string, or array and not " + threadIDType + "." });
-    if (replyToMessage && messageIDType !== "String") return callback({ error: "MessageID should be of type string and not " + threadIDType + "." });
-    if (msgType === "String") msg = { body: msg };
-    const disallowedProperties = Object.keys(msg).filter(prop => !allowedProperties[prop]);
-    if (disallowedProperties.length > 0) return callback({ error: "Disallowed props: `" + disallowedProperties.join(", ") + "`" });
-    const messageAndOTID = generateOfflineThreadingID();
-    const form = {
-      client: "mercury",
-      action_type: "ma-type:user-generated-message",
-      author: "fbid:" + ctx.userID,
-      timestamp: Date.now(),
-      timestamp_absolute: "Today",
-      timestamp_relative: generateTimestampRelative(),
-      timestamp_time_passed: "0",
-      is_unread: false,
-      is_cleared: false,
-      is_forward: false,
-      is_filtered_content: false,
-      is_filtered_content_bh: false,
-      is_filtered_content_account: false,
-      is_filtered_content_quasar: false,
-      is_filtered_content_invalid_app: false,
-      is_spoof_warning: false,
-      source: "source:chat:web",
-      "source_tags[0]": "source:chat",
-      body: msg.body ? msg.body.toString() : "",
-      html_body: false,
-      ui_push_phase: "V3",
-      status: "0",
-      offline_threading_id: messageAndOTID,
-      message_id: messageAndOTID,
-      threading_id: generateThreadingID(ctx.clientID),
-      ephemeral_ttl_mode: "0",
-      manual_retry_cnt: "0",
-      signatureID: getSignatureID(),
-      replied_to_message_id: replyToMessage ? replyToMessage.toString() : ""
+
+    if (replyToMessage) {
+      payload0.reply_metadata = { reply_source_id: replyToMessage, reply_source_type: 1, reply_type: 0 };
+    }
+
+    if (m.attachment) {
+      payload0.send_type = 3;
+      if (payload0.text === "") payload0.text = null;
+      payload0.attachment_fbids = [];
+      let list = m.attachment;
+      if (getType(list) !== "Array") list = [list];
+      const idsFromPairs = [];
+      const streams = [];
+      for (const it of list) {
+        if (Array.isArray(it) && typeof it[0] === "string") {
+          idsFromPairs.push(String(it[1]));
+        } else if (isReadableStream(it)) {
+          streams.push(it);
+        }
+      }
+      if (idsFromPairs.length) payload0.attachment_fbids.push(...idsFromPairs);
+      if (streams.length) {
+        try {
+          const files = await uploadAttachment(streams);
+          for (const file of files) {
+            const key = Object.keys(file)[0];
+            payload0.attachment_fbids.push(file[key]);
+          }
+        } catch (err) {
+          log.error("uploadAttachment", err);
+          callback(err);
+          throw err;
+        }
+      }
+    }
+
+    const content = {
+      app_id: "2220391788200892",
+      payload: {
+        tasks: [
+          {
+            label: "46",
+            payload: payload0,
+            queue_name: String(threadID),
+            task_id: 400,
+            failure_count: null
+          },
+          {
+            label: "21",
+            payload: {
+              thread_id: String(threadID),
+              last_read_watermark_ts: Date.now(),
+              sync_group: 1
+            },
+            queue_name: String(threadID),
+            task_id: 401,
+            failure_count: null
+          }
+        ],
+        epoch_id: epoch,
+        version_id: "24804310205905615",
+        data_trace_id: "#" + Buffer.from(String(Math.random())).toString("base64").replace(/=+$/g, "")
+      },
+      request_id: reqID,
+      type: 3
     };
-    applyPageAuthor(form, msg);
-    handleLocation(msg, form, callback, () =>
-      handleSticker(msg, form, callback, () =>
-        handleAttachment(msg, form, callback, () =>
-          handleUrl(msg, form, callback, () =>
-            handleEmoji(msg, form, callback, () =>
-              handleMention(msg, form, callback, () => {
-                finalizeHasAttachment(form);
-                send(form, threadID, messageAndOTID, callback, isGroup);
-              })
-            )
-          )
-        )
-      )
-    );
-    return returnPromise;
+    content.payload.tasks.forEach(t => (t.payload = JSON.stringify(t.payload)));
+    content.payload = JSON.stringify(content.payload);
+    return publishWithAck(content, baseBody, reqID, callback);
   };
 };

@@ -128,3 +128,6 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 
 ## v2.0.30 - 2025-10-19
 - Hotfix / auto bump
+
+## v2.0.31 - 2025-10-27
+- Hotfix / auto bump
