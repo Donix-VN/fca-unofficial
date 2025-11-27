@@ -34,7 +34,28 @@ function getHeaders(url, options, ctx, customHeader) {
     "Cache-Control": "no-cache"
   };
   if (ctx?.region) headers["X-MSGR-Region"] = ctx.region;
-  if (customHeader && typeof customHeader === "object") Object.assign(headers, customHeader);
+  if (customHeader && typeof customHeader === "object") {
+    // Filter customHeader to only include valid HTTP header values (strings, numbers, booleans)
+    // Exclude functions, objects, arrays, and other non-serializable values
+    for (const [key, value] of Object.entries(customHeader)) {
+      // Skip null, undefined, functions, objects, and arrays
+      if (value === null || value === undefined || typeof value === "function") {
+        continue;
+      }
+      if (typeof value === "object") {
+        // Arrays are objects in JavaScript, so check for arrays explicitly
+        if (Array.isArray(value)) {
+          continue;
+        }
+        // Skip plain objects (but allow null which is already handled above)
+        continue;
+      }
+      // Only allow strings, numbers, and booleans - convert to string
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        headers[key] = String(value);
+      }
+    }
+  }
   return headers;
 }
 
