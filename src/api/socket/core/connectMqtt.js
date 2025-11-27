@@ -12,11 +12,20 @@ module.exports = function createListenMqtt(deps) {
     function scheduleReconnect(delayMs) {
       const d = (ctx._mqttOpt && ctx._mqttOpt.reconnectDelayMs) || 2000;
       const ms = typeof delayMs === "number" ? delayMs : d;
-      if (ctx._reconnectTimer) return; // debounce
+      if (ctx._reconnectTimer) {
+        logger("mqtt reconnect already scheduled", "warn");
+        return; // debounce
+      }
+      if (ctx._ending) {
+        logger("mqtt reconnect skipped - ending", "warn");
+        return;
+      }
       logger(`mqtt will reconnect in ${ms}ms`, "warn");
       ctx._reconnectTimer = setTimeout(() => {
         ctx._reconnectTimer = null;
-        listenMqtt(defaultFuncs, api, ctx, globalCallback);
+        if (!ctx._ending) {
+          listenMqtt(defaultFuncs, api, ctx, globalCallback);
+        }
       }, ms);
     }
     function isEndingLikeError(msg) {
@@ -88,20 +97,29 @@ module.exports = function createListenMqtt(deps) {
       }
 
       if (/Not logged in|Not logged in.|blocked the login|401|403/i.test(msg)) {
-        try { mqttClient.end(true); } catch (_) { }
+        try {
+          if (mqttClient && mqttClient.connected) {
+            mqttClient.end(true);
+          }
+        } catch (_) { }
         return emitAuth(ctx, api, globalCallback,
           /blocked/i.test(msg) ? "login_blocked" : "not_logged_in",
           msg
         );
       }
       logger(`mqtt error: ${msg}`, "error");
-      try { mqttClient.end(true); } catch (_) { }
+      try {
+        if (mqttClient && mqttClient.connected) {
+          mqttClient.end(true);
+        }
+      } catch (_) { }
       if (ctx._ending || ctx._cycling) return;
 
-      if (ctx.globalOptions.autoReconnect) {
+      if (ctx.globalOptions.autoReconnect && !ctx._ending) {
         const d = (ctx._mqttOpt && ctx._mqttOpt.reconnectDelayMs) || 2000;
         logger(`mqtt autoReconnect listenMqtt() in ${d}ms`, "warn");
-        setTimeout(() => listenMqtt(defaultFuncs, api, ctx, globalCallback), d);
+        // Use scheduleReconnect to prevent multiple reconnections
+        scheduleReconnect(d);
       } else {
         globalCallback({ type: "stop_listen", error: msg || "Connection refused" }, null);
       }
@@ -128,8 +146,16 @@ module.exports = function createListenMqtt(deps) {
       mqttClient.publish("/set_client_settings", JSON.stringify({ make_user_available_when_in_foreground: true }), { qos: 1 });
       const d = (ctx._mqttOpt && ctx._mqttOpt.reconnectDelayMs) || 2000;
       const rTimeout = setTimeout(function () {
+        if (ctx._ending) {
+          logger("mqtt t_ms timeout skipped - ending", "warn");
+          return;
+        }
         logger(`mqtt t_ms timeout, cycling in ${d}ms`, "warn");
-        try { mqttClient.end(true); } catch (_) { }
+        try {
+          if (mqttClient && mqttClient.connected) {
+            mqttClient.end(true);
+          }
+        } catch (_) { }
         scheduleReconnect(d);
       }, 5000);
 
@@ -141,9 +167,15 @@ module.exports = function createListenMqtt(deps) {
     });
 
     mqttClient.on("message", function (topic, message) {
+      if (ctx._ending) return; // Ignore messages if ending
       try {
         let jsonMessage = Buffer.isBuffer(message) ? Buffer.from(message).toString() : message;
-        try { jsonMessage = JSON.parse(jsonMessage); } catch (_) { jsonMessage = {}; }
+        try {
+          jsonMessage = JSON.parse(jsonMessage);
+        } catch (parseErr) {
+          logger(`mqtt message parse error for topic ${topic}: ${parseErr && parseErr.message ? parseErr.message : String(parseErr)}`, "warn");
+          jsonMessage = {};
+        }
 
         if (jsonMessage.type === "jewel_requests_add") {
           globalCallback(null, { type: "friend_request_received", actorFbId: jsonMessage.from.toString(), timestamp: Date.now().toString() });
@@ -186,11 +218,26 @@ module.exports = function createListenMqtt(deps) {
           }
         }
       } catch (ex) {
-        logger(`mqtt message parse error: ${ex && ex.message ? ex.message : ex}`, "error");
+        const errMsg = ex && ex.message ? ex.message : String(ex || "Unknown error");
+        logger(`mqtt message handler error: ${errMsg}`, "error");
+        // Don't crash on message parsing errors, just log and continue
       }
     });
 
-    mqttClient.on("close", function () { });
-    mqttClient.on("disconnect", () => { });
+    mqttClient.on("close", function () {
+      if (ctx._ending || ctx._cycling) {
+        logger("mqtt close expected", "info");
+        return;
+      }
+      logger("mqtt connection closed", "warn");
+    });
+
+    mqttClient.on("disconnect", () => {
+      if (ctx._ending || ctx._cycling) {
+        logger("mqtt disconnect expected", "info");
+        return;
+      }
+      logger("mqtt disconnected", "warn");
+    });
   };
 };

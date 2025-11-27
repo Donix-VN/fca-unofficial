@@ -61,6 +61,10 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
   let conf = mqttConf(ctx, opts);
 
   function getSeqIDWrapper() {
+    if (ctx._ending && !ctx._cycling) {
+      logger("mqtt getSeqID skipped - ending", "warn");
+      return Promise.resolve();
+    }
     const form = {
       av: ctx.globalOptions.pageID,
       queries: JSON.stringify({
@@ -75,8 +79,25 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
     };
     logger("mqtt getSeqID call", "info");
     return getSeqIDFactory(defaultFuncs, api, ctx, globalCallback, form)
-      .then(() => { logger("mqtt getSeqID done", "info"); ctx._cycling = false; })
-      .catch(e => { logger(`mqtt getSeqID error: ${e && e.message ? e.message : e}`, "error"); });
+      .then(() => {
+        logger("mqtt getSeqID done", "info");
+        ctx._cycling = false;
+      })
+      .catch(e => {
+        ctx._cycling = false;
+        const errMsg = e && e.message ? e.message : String(e || "Unknown error");
+        logger(`mqtt getSeqID error: ${errMsg}`, "error");
+        // Don't reconnect if we're ending
+        if (ctx._ending) return;
+        // Retry after delay if autoReconnect is enabled
+        if (ctx.globalOptions.autoReconnect) {
+          const d = conf.reconnectDelayMs;
+          logger(`mqtt getSeqID will retry in ${d}ms`, "warn");
+          setTimeout(() => {
+            if (!ctx._ending) getSeqIDWrapper();
+          }, d);
+        }
+      });
   }
 
   function isConnected() {
@@ -84,30 +105,70 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
   }
 
   function unsubAll(cb) {
-    if (!isConnected()) return cb && cb();
+    if (!isConnected()) {
+      if (cb) setTimeout(cb, 0);
+      return;
+    }
     let pending = topics.length;
-    if (!pending) return cb && cb();
+    if (!pending) {
+      if (cb) setTimeout(cb, 0);
+      return;
+    }
     let fired = false;
+    const timeout = setTimeout(() => {
+      if (!fired) {
+        fired = true;
+        logger("unsubAll timeout, proceeding anyway", "warn");
+        if (cb) cb();
+      }
+    }, 5000); // 5 second timeout
+
     topics.forEach(t => {
-      ctx.mqttClient.unsubscribe(t, () => {
-        if (--pending === 0 && !fired) { fired = true; cb && cb(); }
-      });
+      try {
+        ctx.mqttClient.unsubscribe(t, () => {
+          if (--pending === 0 && !fired) {
+            clearTimeout(timeout);
+            fired = true;
+            if (cb) cb();
+          }
+        });
+      } catch (err) {
+        logger(`unsubAll error for topic ${t}: ${err && err.message ? err.message : String(err)}`, "warn");
+        if (--pending === 0 && !fired) {
+          clearTimeout(timeout);
+          fired = true;
+          if (cb) cb();
+        }
+      }
     });
   }
 
   function endQuietly(next) {
     const finish = () => {
-      try { ctx.mqttClient && ctx.mqttClient.removeAllListeners(); } catch (_) { }
+      try {
+        if (ctx.mqttClient) {
+          ctx.mqttClient.removeAllListeners();
+        }
+      } catch (_) { }
       ctx.mqttClient = undefined;
       ctx.lastSeqId = null;
       ctx.syncToken = undefined;
       ctx.t_mqttCalled = false;
       ctx._ending = false;
+      ctx._cycling = false;
+      if (ctx._reconnectTimer) {
+        clearTimeout(ctx._reconnectTimer);
+        ctx._reconnectTimer = null;
+      }
       next && next();
     };
     try {
       if (ctx.mqttClient) {
-        if (isConnected()) { try { ctx.mqttClient.publish("/browser_close", "{}"); } catch (_) { } }
+        if (isConnected()) {
+          try {
+            ctx.mqttClient.publish("/browser_close", "{}", { qos: 0 });
+          } catch (_) { }
+        }
         ctx.mqttClient.end(true, finish);
       } else finish();
     } catch (_) { finish(); }
@@ -120,7 +181,10 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
   }
 
   function forceCycle() {
-    if (ctx._cycling) return;
+    if (ctx._cycling) {
+      logger("mqtt force cycle already in progress", "warn");
+      return;
+    }
     ctx._cycling = true;
     ctx._ending = true;
     logger("mqtt force cycle begin", "warn");
@@ -138,6 +202,11 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
           clearInterval(ctx._autoCycleTimer);
           ctx._autoCycleTimer = null;
           logger("mqtt auto-cycle cleared", "info");
+        }
+
+        if (ctx._reconnectTimer) {
+          clearTimeout(ctx._reconnectTimer);
+          ctx._reconnectTimer = null;
         }
 
         ctx._ending = true;

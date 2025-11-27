@@ -1,5 +1,6 @@
 "use strict";
 const { formatDeltaEvent, formatMessage, _formatAttachment, formatDeltaMessage, formatDeltaReadReceipt, formatID, getType, decodeClientPayload } = require("../../../utils/format");
+const logger = require("../../../func/logger");
 module.exports = function createParseDelta(deps) {
   const { markDelivery, parseAndCheckLogin } = deps;
   return function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {
@@ -21,9 +22,11 @@ module.exports = function createParseDelta(deps) {
           }
         } else {
           const attachment = delta.attachments[i];
-          if (attachment.mercury.attach_type === "photo") {
+          if (attachment && attachment.mercury && attachment.mercury.attach_type === "photo") {
             api.resolvePhotoUrl(attachment.fbid, (err, url) => {
-              if (!err) attachment.mercury.metadata.url = url;
+              if (!err && attachment.mercury && attachment.mercury.metadata) {
+                attachment.mercury.metadata.url = url;
+              }
               resolveAttachmentUrl(i + 1);
             });
           } else {
@@ -166,7 +169,10 @@ module.exports = function createParseDelta(deps) {
                   mentions: mobj,
                   timestamp: parseInt(fetchData.timestamp_precise)
                 };
-              }).catch(err => {}).finally(() => {
+              }).catch(err => {
+                const errMsg = err && err.message ? err.message : String(err || "Unknown error");
+                logger(`parseDelta message_reply fetch error: ${errMsg}`, "warn");
+              }).finally(() => {
                 if (ctx.globalOptions.autoMarkDelivery) {
                   markDelivery(ctx, api, callbackToReturn.threadID, callbackToReturn.messageID);
                 }
@@ -313,7 +319,10 @@ module.exports = function createParseDelta(deps) {
             } else {
               return;
             }
-          }).catch(err => {});
+          }).catch(err => {
+            const errMsg = err && err.message ? err.message : String(err || "Unknown error");
+            logger(`parseDelta ForcedFetch error: ${errMsg}`, "warn");
+          });
         }
         break;
       }

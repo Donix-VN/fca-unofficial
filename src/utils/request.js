@@ -17,21 +17,39 @@ const client = wrapper(axios.create({
   jar,
   withCredentials: true,
   timeout: 60000,
-  validateStatus: s => s >= 200 && s < 600
+  validateStatus: s => s >= 200 && s < 600,
+  maxRedirects: 5,
+  maxContentLength: Infinity,
+  maxBodyLength: Infinity
 }));
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
-async function requestWithRetry(fn, retries = 3) {
-  let err;
+async function requestWithRetry(fn, retries = 3, baseDelay = 1000) {
+  let lastError;
   for (let i = 0; i < retries; i++) {
-    try { return await fn(); } catch (e) {
-      err = e;
-      if (i === retries - 1) return e.response ? e.response : Promise.reject(e);
-      await delay((1 << i) * 1000 + Math.floor(Math.random() * 200));
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      // Don't retry on client errors (4xx) except 429 (rate limit)
+      const status = e?.response?.status || e?.statusCode || 0;
+      if (status >= 400 && status < 500 && status !== 429) {
+        return e.response || Promise.reject(e);
+      }
+      // Don't retry on last attempt
+      if (i === retries - 1) {
+        return e.response || Promise.reject(e);
+      }
+      // Exponential backoff with jitter
+      const backoffDelay = Math.min(
+        baseDelay * Math.pow(2, i) + Math.floor(Math.random() * 200),
+        30000 // Max 30 seconds
+      );
+      await delay(backoffDelay);
     }
   }
-  throw err;
+  throw lastError || new Error("Request failed after retries");
 }
 
 function cfg(base = {}) {
@@ -69,12 +87,12 @@ function isPairArrayList(arr) {
 }
 
 function cleanGet(url) {
-  return requestWithRetry(() => client.get(url, cfg()));
+  return requestWithRetry(() => client.get(url, cfg()), 3, 1000);
 }
 
 function get(url, reqJar, qs, options, ctx, customHeader) {
   const headers = getHeaders(url, options, ctx, customHeader);
-  return requestWithRetry(() => client.get(url, cfg({ reqJar, headers, params: qs })));
+  return requestWithRetry(() => client.get(url, cfg({ reqJar, headers, params: qs })), 3, 1000);
 }
 
 function post(url, reqJar, form, options, ctx, customHeader) {
@@ -107,7 +125,7 @@ function post(url, reqJar, form, options, ctx, customHeader) {
     data = p.toString();
     headers["Content-Type"] = "application/x-www-form-urlencoded";
   }
-  return requestWithRetry(() => client.post(url, data, cfg({ reqJar, headers })));
+  return requestWithRetry(() => client.post(url, data, cfg({ reqJar, headers })), 3, 1000);
 }
 
 async function postFormData(url, reqJar, form, qs, options, ctx) {
@@ -160,7 +178,7 @@ async function postFormData(url, reqJar, form, qs, options, ctx) {
     }
   }
   const headers = { ...getHeaders(url, options, ctx), ...fd.getHeaders() };
-  return requestWithRetry(() => client.post(url, fd, cfg({ reqJar, headers, params: qs })));
+  return requestWithRetry(() => client.post(url, fd, cfg({ reqJar, headers, params: qs })), 3, 1000);
 }
 
 function makeDefaults(html, userID, ctx) {

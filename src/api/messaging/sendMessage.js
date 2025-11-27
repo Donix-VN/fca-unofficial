@@ -56,13 +56,12 @@ module.exports = function (defaultFuncs, api, ctx) {
   }
 
   function publishWithAck(content, text, reqID, callback) {
-    const mqttClient = ctx.mqttClient;
     return new Promise((resolve, reject) => {
       let done = false;
       const cleanup = () => {
         if (done) return;
         done = true;
-        mqttClient.removeListener("message", handleRes);
+        ctx.mqttClient.removeListener("message", handleRes);
       };
       const handleRes = (topic, message) => {
         if (topic !== "/ls_resp") return;
@@ -80,8 +79,8 @@ module.exports = function (defaultFuncs, api, ctx) {
         callback && callback(undefined, bodies);
         resolve(bodies);
       };
-      mqttClient.on("message", handleRes);
-      mqttClient.publish("/ls_req", JSON.stringify(content), { qos: 1, retain: false }, err => {
+      ctx.mqttClient.on("message", handleRes);
+      ctx.mqttClient.publish("/ls_req", JSON.stringify(content), { qos: 1, retain: false }, err => {
         if (err) {
           cleanup();
           callback && callback(err);
