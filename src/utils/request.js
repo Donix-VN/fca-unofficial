@@ -12,6 +12,66 @@ const getType = formatMod.getType || formatMod;
 const constMod = require("./constants");
 const getFrom = constMod.getFrom || constMod;
 
+// Sanitize header value to remove invalid characters
+function sanitizeHeaderValue(value) {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  // Remove invalid characters for HTTP headers:
+  // - Control characters (0x00-0x1F, except HTAB 0x09)
+  // - DEL character (0x7F)
+  // - Newlines and carriage returns
+  return str.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F\r\n]/g, "").trim();
+}
+
+// Sanitize header name to ensure it's valid
+function sanitizeHeaderName(name) {
+  if (!name || typeof name !== "string") return "";
+  // Remove invalid characters for HTTP header names
+  return name.replace(/[^\x21-\x7E]/g, "").trim();
+}
+
+// Sanitize all headers in an object
+function sanitizeHeaders(headers) {
+  if (!headers || typeof headers !== "object") return {};
+  const sanitized = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const sanitizedKey = sanitizeHeaderName(key);
+    if (!sanitizedKey) continue;
+
+    // Handle arrays - skip them entirely
+    if (Array.isArray(value)) continue;
+
+    // Handle objects - skip them
+    if (value !== null && typeof value === "object") continue;
+
+    // Handle functions - skip them
+    if (typeof value === "function") continue;
+
+    // Check if string value looks like a stringified array (e.g., "["performAutoLogin"]")
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        // Try to parse as JSON array - if successful, skip this header
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            continue; // Skip stringified arrays
+          }
+        } catch {
+          // Not valid JSON array, continue with normal sanitization
+        }
+      }
+    }
+
+    // Sanitize the value
+    const sanitizedValue = sanitizeHeaderValue(value);
+    if (sanitizedValue !== "") {
+      sanitized[sanitizedKey] = sanitizedValue;
+    }
+  }
+  return sanitized;
+}
+
 const jar = new CookieJar();
 const client = wrapper(axios.create({
   jar,
@@ -32,6 +92,16 @@ async function requestWithRetry(fn, retries = 3, baseDelay = 1000) {
       return await fn();
     } catch (e) {
       lastError = e;
+
+      // Handle ERR_INVALID_CHAR and other header errors - don't retry, return error immediately
+      if (e?.code === "ERR_INVALID_CHAR" || (e?.message && e.message.includes("Invalid character in header"))) {
+        const err = new Error("Invalid header content detected. Request aborted to prevent crash.");
+        err.error = "Invalid header content";
+        err.originalError = e;
+        err.code = "ERR_INVALID_CHAR";
+        return Promise.reject(err);
+      }
+
       // Don't retry on client errors (4xx) except 429 (rate limit)
       const status = e?.response?.status || e?.statusCode || 0;
       if (status >= 400 && status < 500 && status !== 429) {
@@ -49,13 +119,15 @@ async function requestWithRetry(fn, retries = 3, baseDelay = 1000) {
       await delay(backoffDelay);
     }
   }
-  throw lastError || new Error("Request failed after retries");
+  // Return error instead of throwing to prevent uncaught exception
+  const finalError = lastError || new Error("Request failed after retries");
+  return Promise.reject(finalError);
 }
 
 function cfg(base = {}) {
   const { reqJar, headers, params, agent, timeout } = base;
   return {
-    headers,
+    headers: sanitizeHeaders(headers),
     params,
     jar: reqJar || jar,
     withCredentials: true,

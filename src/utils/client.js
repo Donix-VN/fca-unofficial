@@ -131,6 +131,15 @@ function parseAndCheckLogin(ctx, http, retryCount = 0) {
             // Retry parsing with the new response
             return await parseAndCheckLogin(ctx, http, retryCount)(newData);
           } catch (retryErr) {
+            // Handle ERR_INVALID_CHAR - don't retry, return error immediately
+            if (retryErr?.code === "ERR_INVALID_CHAR" || (retryErr?.message && retryErr.message.includes("Invalid character in header"))) {
+              logger(`Auto login retry failed: Invalid header detected. Error: ${retryErr.message}`, "error");
+              const e = new Error("Not logged in. Auto login retry failed due to invalid header.");
+              e.error = "Not logged in.";
+              e.res = resData;
+              e.originalError = retryErr;
+              throw e;
+            }
             logger(`Auto login retry failed: ${retryErr && retryErr.message ? retryErr.message : String(retryErr)}`, "error");
             const e = new Error("Not logged in. Auto login retry failed.");
             e.error = "Not logged in.";
@@ -179,8 +188,12 @@ function parseAndCheckLogin(ctx, http, retryCount = 0) {
         throw err;
       }
       // Exponential backoff with jitter
+      // First retry: ~1507ms (1500ms base + small jitter)
+      // Subsequent retries: exponential backoff
+      const baseDelay = retryCount === 0 ? 1500 : 1000 * Math.pow(2, retryCount);
+      const jitter = Math.floor(Math.random() * 200); // 0-199ms jitter
       const retryTime = Math.min(
-        Math.floor(Math.random() * (1000 * Math.pow(2, retryCount))) + 1000,
+        baseDelay + jitter,
         10000 // Max 10 seconds
       );
       logger(`parseAndCheckLogin: Retrying request (attempt ${retryCount + 1}/5) after ${retryTime}ms for status ${status}`, "warn");
@@ -205,7 +218,26 @@ function parseAndCheckLogin(ctx, http, retryCount = 0) {
           return await parseAndCheckLogin(ctx, http, retryCount)(newData);
         }
       } catch (retryErr) {
-        if (retryCount >= 5) throw retryErr;
+        // Handle ERR_INVALID_CHAR - don't retry, return error immediately
+        if (retryErr?.code === "ERR_INVALID_CHAR" || (retryErr?.message && retryErr.message.includes("Invalid character in header"))) {
+          logger(`parseAndCheckLogin: Invalid header detected, aborting retry. Error: ${retryErr.message}`, "error");
+          const err = new Error("Invalid header content detected. Request aborted to prevent crash.");
+          err.error = "Invalid header content";
+          err.statusCode = status;
+          err.res = res?.data;
+          err.originalError = retryErr;
+          throw err;
+        }
+        // If max retries reached, return error instead of throwing to prevent crash
+        if (retryCount >= 5) {
+          logger(`parseAndCheckLogin: Max retries reached, returning error instead of crashing`, "error");
+          const err = new Error("Request retry failed after 5 attempts. Check the `res` and `statusCode` property on this error.");
+          err.statusCode = status;
+          err.res = res?.data;
+          err.error = "Request retry failed after 5 attempts";
+          err.originalError = retryErr;
+          throw err;
+        }
         // Continue retry loop
         return await parseAndCheckLogin(ctx, http, retryCount)(res);
       }
