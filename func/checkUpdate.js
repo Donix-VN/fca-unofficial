@@ -2,7 +2,14 @@ const logger = require("./logger");
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
+const https = require("https");
 const pkgName = "@dongdev/fca-unofficial";
+
+let axios = null;
+try {
+  axios = require("axios");
+} catch (e) {
+}
 
 const TEMP_DIR = path.join(process.cwd(), "temp");
 const LOCK_FILE = path.join(TEMP_DIR, ".fca-update-lock.json");
@@ -47,10 +54,100 @@ async function getInstalledVersionByNpm() {
   try {
     const { stdout } = await execPromise(`npm ls ${pkgName} --json --depth=0`);
     const json = JSON.parse(stdout || "{}");
-    const v = json?.dependencies?.[pkgName]?.version;
-    return v || null;
+    const v = (json && json.dependencies && json.dependencies[pkgName] && json.dependencies[pkgName].version) || null;
+    return v;
   } catch {
     return null;
+  }
+}
+
+async function getLatestVersionFromNpmRegistry() {
+  const url = `https://registry.npmjs.org/${pkgName}/latest`;
+
+  if (axios) {
+    try {
+      const response = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'fca-unofficial-updater',
+          'Accept': 'application/json'
+        }
+      });
+      if (response && response.data && response.data.version) {
+        return response.data.version;
+      }
+      throw new Error("Invalid response from npm registry");
+    } catch (error) {
+      if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+        throw new Error("Request timeout");
+      }
+      throw error;
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Request timeout"));
+    }, 10000);
+
+    https.get(url, {
+      headers: {
+        'User-Agent': 'fca-unofficial-updater',
+        'Accept': 'application/json'
+      }
+    }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        clearTimeout(timeout);
+        try {
+          const json = JSON.parse(data);
+          if (json && json.version) {
+            resolve(json.version);
+          } else {
+            reject(new Error("Invalid response from npm registry"));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+async function getLatestVersion() {
+  const nodeVersion = process.version;
+  const nodeMajor = parseInt(nodeVersion.split('.')[0].substring(1), 10);
+
+  const shouldUseNpmCommand = nodeMajor >= 12 && nodeMajor < 20;
+
+  if (shouldUseNpmCommand) {
+    try {
+      const { stdout } = await execPromise(`npm view ${pkgName} version`);
+      const version = stdout.trim();
+      if (version && version.length > 0) {
+        return version;
+      }
+    } catch (npmError) {
+      const errorMsg = npmError.error && npmError.error.message ? npmError.error.message : String(npmError);
+      if (errorMsg.includes("npm") && errorMsg.includes("not to run")) {
+        logger("npm version incompatible, using registry API instead", "warn");
+      } else {
+        logger("npm view failed, using registry API instead", "warn");
+      }
+    }
+  } else {
+    logger("Using npm registry API (bypassing npm command)", "info");
+  }
+  try {
+    const version = await getLatestVersionFromNpmRegistry();
+    return version;
+  } catch (httpError) {
+    const errorMsg = httpError && httpError.message ? httpError.message : String(httpError);
+    logger(`Failed to get latest version: ${errorMsg}`, "error");
+    throw new Error("Cannot check for updates: npm command failed and registry API unavailable");
   }
 }
 
@@ -62,7 +159,13 @@ async function _checkAndUpdateVersionImpl() {
   }
 
   logger("Checking version...", "info");
-  const latest = (await execPromise(`npm view ${pkgName} version`)).stdout.trim();
+  let latest;
+  try {
+    latest = await getLatestVersion();
+  } catch (error) {
+    logger(`Cannot check for updates: ${error.message || error}. Skipping version check.`, "warn");
+    return;
+  }
 
   let installed = getInstalledVersion();
   if (!installed) installed = await getInstalledVersionByNpm();
