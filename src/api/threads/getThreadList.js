@@ -226,14 +226,59 @@ module.exports = function(defaultFuncs, api, ctx) {
       .post("https://www.facebook.com/api/graphqlbatch/", ctx.jar, form)
       .then(parseAndCheckLogin(ctx, defaultFuncs))
       .then(resData => {
-        if (resData[resData.length - 1].error_results > 0)
-          throw resData[0].o0.errors;
-        if (resData[resData.length - 1].successful_results === 0)
+        // Validate resData is an array and has elements
+        if (!resData || !Array.isArray(resData) || resData.length === 0) {
+          throw {
+            error: "getThreadList: Invalid response data - resData is not a valid array",
+            res: resData
+          };
+        }
+
+        // Validate last element exists and has required properties
+        const lastElement = resData[resData.length - 1];
+        if (!lastElement || typeof lastElement !== "object") {
+          throw {
+            error: "getThreadList: Invalid response data - last element is missing or invalid",
+            res: resData
+          };
+        }
+
+        if (lastElement.error_results > 0) {
+          // Check if first element and o0 exist before accessing errors
+          if (resData[0] && resData[0].o0 && resData[0].o0.errors) {
+            throw resData[0].o0.errors;
+          } else {
+            throw {
+              error: "getThreadList: Error results > 0 but error details not available",
+              res: resData
+            };
+          }
+        }
+
+        if (lastElement.successful_results === 0) {
           throw {
             error: "getThreadList: there was no successful_results",
             res: resData
           };
-        if (timestamp) resData[0].o0.data.viewer.message_threads.nodes.shift();
+        }
+
+        // Validate first element and nested data structure
+        if (!resData[0] || !resData[0].o0 || !resData[0].o0.data ||
+            !resData[0].o0.data.viewer || !resData[0].o0.data.viewer.message_threads ||
+            !Array.isArray(resData[0].o0.data.viewer.message_threads.nodes)) {
+          throw {
+            error: "getThreadList: Invalid response data structure - missing required fields",
+            res: resData
+          };
+        }
+
+        if (timestamp) {
+          const nodes = resData[0].o0.data.viewer.message_threads.nodes;
+          if (Array.isArray(nodes) && nodes.length > 0) {
+            nodes.shift();
+          }
+        }
+
         callback(
           null,
           formatThreadList(resData[0].o0.data.viewer.message_threads.nodes)
