@@ -1,7 +1,5 @@
 "use strict";
 const { formatID } = require("../../../utils/format");
-const uuid = require("uuid");
-"use strict";
 module.exports = function createListenMqtt(deps) {
   const { WebSocket, mqtt, HttpsProxyAgent, buildStream, buildProxy,
     topics, parseDelta, getTaskResponseData, logger, emitAuth
@@ -87,7 +85,11 @@ module.exports = function createListenMqtt(deps) {
       options
     );
     const mqttClient = ctx.mqttClient;
-    global.mqttClient = mqttClient;
+    // Remove global reference to prevent memory leak
+    // Only set if needed for debugging, but clear on cleanup
+    if (process.env.DEBUG_MQTT) {
+      global.mqttClient = mqttClient;
+    }
 
     mqttClient.on("error", function (err) {
       const msg = String(err && err.message ? err.message : err || "");
@@ -145,7 +147,8 @@ module.exports = function createListenMqtt(deps) {
       mqttClient.publish("/foreground_state", JSON.stringify({ foreground: chatOn }), { qos: 1 });
       mqttClient.publish("/set_client_settings", JSON.stringify({ make_user_available_when_in_foreground: true }), { qos: 1 });
       const d = (ctx._mqttOpt && ctx._mqttOpt.reconnectDelayMs) || 2000;
-      const rTimeout = setTimeout(function () {
+      let rTimeout = setTimeout(function () {
+        rTimeout = null;
         if (ctx._ending) {
           logger("mqtt t_ms timeout skipped - ending", "warn");
           return;
@@ -159,8 +162,17 @@ module.exports = function createListenMqtt(deps) {
         scheduleReconnect(d);
       }, 5000);
 
+      // Store timeout reference for cleanup
+      ctx._rTimeout = rTimeout;
+
       ctx.tmsWait = function () {
-        clearTimeout(rTimeout);
+        if (rTimeout) {
+          clearTimeout(rTimeout);
+          rTimeout = null;
+        }
+        if (ctx._rTimeout) {
+          delete ctx._rTimeout;
+        }
         if (ctx.globalOptions.emitReady) globalCallback({ type: "ready", error: null });
         delete ctx.tmsWait;
       };

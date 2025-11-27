@@ -13,6 +13,7 @@ const createGetSeqID = require("./core/getSeqID");
 const markDelivery = require("./core/markDelivery");
 const getTaskResponseData = require("./core/getTaskResponseData");
 const createEmitAuth = require("./core/emitAuth");
+const createMiddlewareSystem = require("./middleware");
 const parseDelta = createParseDelta({ markDelivery, parseAndCheckLogin });
 // Create emitAuth first so it can be injected into both factories
 const emitAuth = createEmitAuth({ logger });
@@ -31,6 +32,12 @@ function mqttConf(ctx, overrides) {
 module.exports = function (defaultFuncs, api, ctx, opts) {
   const identity = function () { };
   let globalCallback = identity;
+
+  // Initialize middleware system if not already initialized
+  if (!ctx._middleware) {
+    ctx._middleware = createMiddlewareSystem();
+  }
+  const middleware = ctx._middleware;
 
   function installPostGuard() {
     if (ctx._postGuarded) return defaultFuncs.post;
@@ -160,6 +167,43 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
         clearTimeout(ctx._reconnectTimer);
         ctx._reconnectTimer = null;
       }
+      if (ctx._rTimeout) {
+        clearTimeout(ctx._rTimeout);
+        ctx._rTimeout = null;
+      }
+      // Clean up tasks Map to prevent memory leak
+      if (ctx.tasks && ctx.tasks instanceof Map) {
+        ctx.tasks.clear();
+      }
+      // Clean up userInfo intervals
+      if (ctx._userInfoIntervals && Array.isArray(ctx._userInfoIntervals)) {
+        ctx._userInfoIntervals.forEach(interval => {
+          try {
+            clearInterval(interval);
+          } catch (_) { }
+        });
+        ctx._userInfoIntervals = [];
+      }
+      // Clean up autoSave intervals
+      if (ctx._autoSaveInterval && Array.isArray(ctx._autoSaveInterval)) {
+        ctx._autoSaveInterval.forEach(interval => {
+          try {
+            clearInterval(interval);
+          } catch (_) { }
+        });
+        ctx._autoSaveInterval = [];
+      }
+      // Clean up scheduler
+      if (ctx._scheduler && typeof ctx._scheduler.destroy === "function") {
+        try {
+          ctx._scheduler.destroy();
+        } catch (_) { }
+        ctx._scheduler = undefined;
+      }
+      // Clear global mqttClient reference if set
+      if (global.mqttClient) {
+        delete global.mqttClient;
+      }
       next && next();
     };
     try {
@@ -224,10 +268,19 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
 
     const msgEmitter = new MessageEmitter();
 
-    globalCallback = callback || function (error, message) {
+    // Original callback without middleware
+    const originalCallback = callback || function (error, message) {
       if (error) { logger("mqtt emit error", "error"); return msgEmitter.emit("error", error); }
       msgEmitter.emit("message", message);
     };
+
+    // Only wrap callback with middleware if middleware exists
+    // If no middleware, use callback directly for better performance
+    if (middleware.count > 0) {
+      globalCallback = middleware.wrapCallback(originalCallback);
+    } else {
+      globalCallback = originalCallback;
+    }
 
     conf = mqttConf(ctx, conf);
 
@@ -253,6 +306,60 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
 
     api.stopListening = msgEmitter.stopListening;
     api.stopListeningAsync = msgEmitter.stopListeningAsync;
+
+    // Store original callback for re-wrapping when middleware is added/removed
+    let currentOriginalCallback = originalCallback;
+    let currentGlobalCallback = globalCallback;
+
+    // Function to re-wrap callback when middleware changes
+    function rewrapCallbackIfNeeded() {
+      if (!ctx.mqttClient || ctx._ending) return; // Not listening or ending
+
+      const hasMiddleware = middleware.count > 0;
+      const isWrapped = currentGlobalCallback !== currentOriginalCallback;
+
+      // If middleware exists but callback is not wrapped, wrap it
+      if (hasMiddleware && !isWrapped) {
+        currentGlobalCallback = middleware.wrapCallback(currentOriginalCallback);
+        globalCallback = currentGlobalCallback;
+        logger("Middleware added - callback re-wrapped", "info");
+      }
+      // If no middleware but callback is wrapped, unwrap it
+      else if (!hasMiddleware && isWrapped) {
+        currentGlobalCallback = currentOriginalCallback;
+        globalCallback = currentGlobalCallback;
+        logger("All middleware removed - callback unwrapped", "info");
+      }
+    }
+
+    // Expose middleware API with re-wrapping support
+    api.useMiddleware = function (middlewareFn, fn) {
+      const result = middleware.use(middlewareFn, fn);
+      rewrapCallbackIfNeeded();
+      return result;
+    };
+    api.removeMiddleware = function (identifier) {
+      const result = middleware.remove(identifier);
+      rewrapCallbackIfNeeded();
+      return result;
+    };
+    api.clearMiddleware = function () {
+      const result = middleware.clear();
+      rewrapCallbackIfNeeded();
+      return result;
+    };
+    api.listMiddleware = function () {
+      return middleware.list();
+    };
+    api.setMiddlewareEnabled = function (name, enabled) {
+      const result = middleware.setEnabled(name, enabled);
+      rewrapCallbackIfNeeded();
+      return result;
+    };
+    Object.defineProperty(api, "middlewareCount", {
+      get: function () { return middleware.count; }
+    });
+
     return msgEmitter;
   };
 };

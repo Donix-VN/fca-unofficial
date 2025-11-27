@@ -574,7 +574,8 @@ function formatDeltaMessage(m) {
     mentions: mentions,
     timestamp: md.timestamp,
     isGroup: !!md.threadKey.threadFbId,
-    participantIDs: m.participants || []
+    participantIDs: (m.participants || []).map((/** @type {any} */ p) => formatID(p.toString())),
+    isUnread: md.isUnread !== undefined ? md.isUnread : false
   };
 }
 
@@ -585,6 +586,8 @@ function formatID(id) {
 
 function formatMessage(m) {
   var originalMessage = m.message ? m.message : m;
+  var body = originalMessage.body || "";
+  var args = body == "" ? [] : body.trim().split(/\s+/);
   var obj = {
     type: "message",
     senderName: originalMessage.sender_name,
@@ -597,7 +600,8 @@ function formatMessage(m) {
         return formatID(v.toString());
       })
       : [formatID(originalMessage.sender_fbid)],
-    body: originalMessage.body || "",
+    body: body,
+    args: args,
     threadID: formatID(
       (
         originalMessage.thread_fbid || originalMessage.other_user_fbid

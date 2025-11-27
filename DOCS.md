@@ -321,10 +321,13 @@ const stopListening = api.listenMqtt((err, event) => {
     messageID: "mid.xxx",
     senderID: "100012345678901",
     body: "Message content",
+    args: ["Message", "content"],  // Array of words from body (split by whitespace)
     attachments: [],  // Array of attachments
     mentions: {},     // Object of mentions
     timestamp: 1234567890000,
-    isGroup: false    // true if group chat
+    isGroup: false,   // true if group chat
+    isUnread: false,  // Whether message is unread
+    participantIDs: ["100012345678901"]  // Array of participant IDs
 }
 
 // Event type: "event"
@@ -355,7 +358,241 @@ const stopListening = api.listenMqtt((err, event) => {
 
 ---
 
-### 3.3. getUserInfo - Get User Information
+### 3.3. Middleware System - Filter and Process Events
+
+The middleware system allows you to intercept, filter, and modify events before they are emitted to your callback. This is useful for logging, rate limiting, message filtering, auto-replies, and more.
+
+#### Syntax:
+```javascript
+// Add middleware
+const removeMiddleware = api.useMiddleware(middlewareFunction);
+const removeMiddleware = api.useMiddleware("middlewareName", middlewareFunction);
+
+// Remove middleware
+api.removeMiddleware(identifier); // identifier can be name (string) or function
+
+// Clear all middleware
+api.clearMiddleware();
+
+// List middleware
+const names = api.listMiddleware();
+
+// Enable/disable middleware
+api.setMiddlewareEnabled("middlewareName", true); // enable
+api.setMiddlewareEnabled("middlewareName", false); // disable
+
+// Get middleware count
+const count = api.middlewareCount;
+```
+
+#### Middleware Function Signature:
+```javascript
+function middleware(event, next) {
+    // event: The event object (can be modified)
+    // next: Function to continue to next middleware
+    //   - next() - continue to next middleware
+    //   - next(false) or next(null) - stop processing, don't emit event
+    //   - next(error) - emit error instead
+
+    // Your logic here
+
+    next(); // Continue to next middleware
+}
+```
+
+#### Examples:
+
+**1. Message Filtering - Block messages from specific users:**
+```javascript
+api.useMiddleware("blockUsers", (event, next) => {
+    if (event.type === "message") {
+        const blockedUsers = ["100012345678901", "100012345678902"];
+        if (blockedUsers.includes(event.senderID)) {
+            // Block this message
+            return next(false);
+        }
+    }
+    next(); // Continue processing
+});
+```
+
+**2. Logging Middleware:**
+```javascript
+api.useMiddleware("logger", (event, next) => {
+    if (event.type === "message") {
+        console.log(`[${new Date().toISOString()}] Message from ${event.senderID}: ${event.body}`);
+    }
+    next(); // Continue to next middleware
+});
+```
+
+**3. Auto-Reply Middleware:**
+```javascript
+api.useMiddleware("autoReply", (event, next) => {
+    if (event.type === "message" && event.body.toLowerCase() === "hello") {
+        api.sendMessage("Hi there! How can I help you?", event.threadID);
+    }
+    next(); // Continue processing
+});
+```
+
+**4. Rate Limiting Middleware:**
+```javascript
+const messageCounts = {};
+const RATE_LIMIT = 10; // messages per minute
+const RATE_WINDOW = 60000; // 1 minute
+
+api.useMiddleware("rateLimit", (event, next) => {
+    if (event.type === "message") {
+        const now = Date.now();
+        const senderID = event.senderID;
+
+        // Clean old entries
+        if (messageCounts[senderID] && messageCounts[senderID].timestamp < now - RATE_WINDOW) {
+            delete messageCounts[senderID];
+        }
+
+        // Initialize or increment
+        if (!messageCounts[senderID]) {
+            messageCounts[senderID] = { count: 0, timestamp: now };
+        }
+        messageCounts[senderID].count++;
+
+        // Check rate limit
+        if (messageCounts[senderID].count > RATE_LIMIT) {
+            console.log(`Rate limit exceeded for user ${senderID}`);
+            return next(false); // Block message
+        }
+    }
+    next();
+});
+```
+
+**5. Message Transformation:**
+```javascript
+api.useMiddleware("transform", (event, next) => {
+    if (event.type === "message") {
+        // Add custom property
+        event.customProperty = "customValue";
+
+        // Transform message body
+        if (event.body) {
+            event.body = event.body.toUpperCase();
+        }
+    }
+    next();
+});
+```
+
+**6. Async Middleware (Promise-based):**
+```javascript
+api.useMiddleware("asyncMiddleware", async (event, next) => {
+    if (event.type === "message") {
+        // Do async operation
+        const userInfo = await api.getUserInfo(event.senderID);
+        event.senderName = userInfo[event.senderID].name;
+    }
+    next(); // Continue
+});
+```
+
+**7. Conditional Middleware:**
+```javascript
+// Only process messages in group chats
+api.useMiddleware("groupOnly", (event, next) => {
+    if (event.type === "message" && !event.isGroup) {
+        return next(false); // Skip non-group messages
+    }
+    next();
+});
+
+// Only process messages containing specific keywords
+api.useMiddleware("keywordFilter", (event, next) => {
+    if (event.type === "message") {
+        const keywords = ["help", "support", "info"];
+        const hasKeyword = keywords.some(keyword =>
+            event.body.toLowerCase().includes(keyword)
+        );
+        if (!hasKeyword) {
+            return next(false); // Skip messages without keywords
+        }
+    }
+    next();
+});
+```
+
+**8. Remove Middleware:**
+```javascript
+// Remove by name
+api.removeMiddleware("logger");
+
+// Remove by function reference
+const myMiddleware = (event, next) => { /* ... */ };
+api.useMiddleware("myMiddleware", myMiddleware);
+// Later...
+api.removeMiddleware(myMiddleware);
+```
+
+**9. Complete Example - Bot with Multiple Middleware:**
+```javascript
+const login = require("@dongdev/fca-unofficial");
+
+login({ appState: [] }, (err, api) => {
+    if (err) return console.error(err);
+
+    // 1. Logging middleware
+    api.useMiddleware("logger", (event, next) => {
+        if (event.type === "message") {
+            console.log(`Message: ${event.body}`);
+        }
+        next();
+    });
+
+    // 2. Block spam users
+    const spamUsers = ["100012345678901"];
+    api.useMiddleware("spamFilter", (event, next) => {
+        if (event.type === "message" && spamUsers.includes(event.senderID)) {
+            return next(false);
+        }
+        next();
+    });
+
+    // 3. Auto-reply to greetings
+    api.useMiddleware("autoReply", (event, next) => {
+        if (event.type === "message") {
+            const greetings = ["hi", "hello", "hey"];
+            if (greetings.includes(event.body.toLowerCase())) {
+                api.sendMessage("Hello! How can I help?", event.threadID);
+            }
+        }
+        next();
+    });
+
+    // 4. Listen for messages (middleware will process them first)
+    api.listenMqtt((err, event) => {
+        if (err) return console.error(err);
+
+        // This callback receives events AFTER middleware processing
+        if (event.type === "message") {
+            console.log("Received message:", event.body);
+        }
+    });
+});
+```
+
+#### Middleware Execution Order:
+Middleware functions are executed in the order they are added. If a middleware calls `next(false)` or `next(null)`, the event will be blocked and not emitted to your callback.
+
+#### Notes:
+- Middleware only processes events, not errors (errors bypass middleware)
+- You can modify the event object in middleware (it will be passed to the next middleware and callback)
+- Middleware can be async (return a Promise)
+- Middleware can be enabled/disabled without removing them
+- The middleware system is persistent across reconnections
+
+---
+
+### 3.4. getUserInfo - Get User Information
 
 Get detailed information about one or more users.
 
@@ -402,7 +639,268 @@ api.getUserInfo(["100012345678901", "100012345678902"], (err, userInfo) => {
 
 ---
 
-### 3.4. getThreadInfo - Get Thread Information
+### 3.4. Message Scheduler - Schedule Messages
+
+Schedule messages to be sent at a specific time in the future. Useful for reminders, scheduled announcements, and automated messages.
+
+#### Syntax:
+```javascript
+// Schedule a message
+const id = api.scheduler.scheduleMessage(message, threadID, when, options);
+
+// Cancel a scheduled message
+api.scheduler.cancelScheduledMessage(id);
+
+// Get scheduled message info
+const scheduled = api.scheduler.getScheduledMessage(id);
+
+// List all scheduled messages
+const list = api.scheduler.listScheduledMessages();
+
+// Cancel all scheduled messages
+const count = api.scheduler.cancelAllScheduledMessages();
+
+// Get count of scheduled messages
+const count = api.scheduler.getScheduledCount();
+```
+
+#### Parameters:
+- `message`: Message content (string or MessageObject)
+- `threadID`: Target thread ID(s) (string or array)
+- `when`: When to send - can be:
+  - `Date` object
+  - `number` (Unix timestamp in milliseconds)
+  - `string` (ISO date string)
+- `options`: Optional object with:
+  - `replyMessageID`: Message ID to reply to
+  - `isGroup`: Whether it's a group chat
+  - `callback`: Callback function when message is sent
+
+#### Examples:
+
+**1. Schedule message for specific time:**
+```javascript
+// Schedule for 1 hour from now
+const oneHourLater = Date.now() + (60 * 60 * 1000);
+const id = api.scheduler.scheduleMessage(
+    "This is a scheduled message!",
+    "100012345678901",
+    oneHourLater
+);
+console.log(`Message scheduled with ID: ${id}`);
+```
+
+**2. Schedule using Date object:**
+```javascript
+// Schedule for tomorrow at 9:00 AM
+const tomorrow = new Date();
+tomorrow.setDate(tomorrow.getDate() + 1);
+tomorrow.setHours(9, 0, 0, 0);
+
+const id = api.scheduler.scheduleMessage(
+    "Good morning! ☀️",
+    "100012345678901",
+    tomorrow
+);
+```
+
+**3. Schedule using ISO string:**
+```javascript
+// Schedule for specific date/time
+const id = api.scheduler.scheduleMessage(
+    "Meeting reminder!",
+    "100012345678901",
+    "2024-12-25T10:00:00Z"
+);
+```
+
+**4. Schedule with options:**
+```javascript
+const id = api.scheduler.scheduleMessage(
+    "Reply to your message",
+    "100012345678901",
+    Date.now() + 30000, // 30 seconds from now
+    {
+        replyMessageID: "mid.xxx",
+        isGroup: false,
+        callback: (err) => {
+            if (err) {
+                console.error("Scheduled message failed:", err);
+            } else {
+                console.log("Scheduled message sent!");
+            }
+        }
+    }
+);
+```
+
+**5. Cancel scheduled message:**
+```javascript
+const id = api.scheduler.scheduleMessage("Test", threadID, Date.now() + 60000);
+
+// Cancel it
+if (api.scheduler.cancelScheduledMessage(id)) {
+    console.log("Message cancelled");
+} else {
+    console.log("Message not found or already sent");
+}
+```
+
+**6. List all scheduled messages:**
+```javascript
+const scheduled = api.scheduler.listScheduledMessages();
+
+scheduled.forEach(msg => {
+    const timeUntil = Math.round(msg.timeUntilSend / 1000 / 60); // minutes
+    console.log(`ID: ${msg.id}, Sends in ${timeUntil} minutes`);
+});
+```
+
+**7. Get scheduled message info:**
+```javascript
+const scheduled = api.scheduler.getScheduledMessage(id);
+if (scheduled) {
+    console.log("Message:", scheduled.message);
+    console.log("Scheduled for:", new Date(scheduled.timestamp));
+    console.log("Time until send:", scheduled.timeUntilSend, "ms");
+}
+```
+
+**8. Complete example - Reminder bot:**
+```javascript
+const login = require("@dongdev/fca-unofficial");
+
+login({ appState: [] }, (err, api) => {
+    if (err) return console.error(err);
+
+    api.listenMqtt((err, event) => {
+        if (err) return console.error(err);
+
+        if (event.type === "message" && event.body.startsWith("/remind")) {
+            const args = event.body.split(" ");
+            if (args.length < 3) {
+                api.sendMessage("Usage: /remind <minutes> <message>", event.threadID);
+                return;
+            }
+
+            const minutes = parseInt(args[1]);
+            const message = args.slice(2).join(" ");
+            const when = Date.now() + (minutes * 60 * 1000);
+
+            const id = api.scheduler.scheduleMessage(
+                message,
+                event.threadID,
+                when
+            );
+
+            api.sendMessage(
+                `Reminder scheduled! I'll remind you in ${minutes} minutes.`,
+                event.threadID
+            );
+        }
+    });
+});
+```
+
+#### Notes:
+- Scheduled messages are stored in memory and will be lost if the bot restarts
+- Messages are sent automatically at the scheduled time
+- You can cancel messages before they are sent
+- The scheduler automatically cleans up expired messages
+
+---
+
+### 3.5. Auto-save AppState
+
+Automatically save AppState to a file at regular intervals to prevent session loss.
+
+#### Syntax:
+```javascript
+// Enable auto-save
+const disable = api.enableAutoSaveAppState(options);
+
+// Disable auto-save
+disable();
+```
+
+#### Parameters:
+- `options`: Optional object with:
+  - `filePath`: Path to save AppState file (default: "appstate.json")
+  - `interval`: Save interval in milliseconds (default: 10 minutes)
+  - `saveOnLogin`: Save immediately on login (default: true)
+
+#### Examples:
+
+**1. Basic auto-save:**
+```javascript
+const login = require("@dongdev/fca-unofficial");
+
+login({ appState: [] }, (err, api) => {
+    if (err) return console.error(err);
+
+    // Enable auto-save (saves every 10 minutes by default)
+    api.enableAutoSaveAppState();
+});
+```
+
+**2. Custom file path and interval:**
+```javascript
+// Save to custom location every 5 minutes
+const disable = api.enableAutoSaveAppState({
+    filePath: "./data/appstate.json",
+    interval: 5 * 60 * 1000, // 5 minutes
+    saveOnLogin: true
+});
+
+// Later, disable it
+// disable();
+```
+
+**3. Save only on login:**
+```javascript
+// Save only once on login, not periodically
+const disable = api.enableAutoSaveAppState({
+    interval: Infinity, // Never save periodically
+    saveOnLogin: true
+});
+```
+
+**4. Complete example:**
+```javascript
+const fs = require("fs");
+const login = require("@dongdev/fca-unofficial");
+
+// Try to load existing AppState
+let appState = [];
+try {
+    appState = JSON.parse(fs.readFileSync("appstate.json", "utf8"));
+} catch (e) {
+    console.log("No existing AppState found");
+}
+
+login({ appState }, (err, api) => {
+    if (err) return console.error(err);
+
+    // Enable auto-save
+    api.enableAutoSaveAppState({
+        filePath: "appstate.json",
+        interval: 10 * 60 * 1000, // 10 minutes
+        saveOnLogin: true
+    });
+
+    console.log("Bot started with auto-save enabled!");
+});
+```
+
+#### Notes:
+- AppState is saved automatically at the specified interval
+- Saves immediately on login if `saveOnLogin` is true
+- The save function checks if AppState is valid before saving
+- Multiple auto-save instances can be enabled with different settings
+
+---
+
+### 3.6. getThreadInfo - Get Thread Information
 
 Get information about conversation/group chat.
 

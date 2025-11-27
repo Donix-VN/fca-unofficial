@@ -268,10 +268,17 @@ module.exports = function (defaultFuncs, api, ctx) {
     isProcessingQueue = false;
   }
 
-  setInterval(() => {
+  // Store interval reference for cleanup
+  const updateInterval = setInterval(() => {
     checkAndUpdateUsers();
     processQueue();
   }, 10000);
+
+  // Store interval in ctx for cleanup on logout/stop
+  if (!ctx._userInfoIntervals) {
+    ctx._userInfoIntervals = [];
+  }
+  ctx._userInfoIntervals.push(updateInterval);
 
   return function getUserInfo(idsOrId, callback) {
     let resolveFunc, rejectFunc;

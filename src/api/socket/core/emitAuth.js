@@ -33,6 +33,60 @@ module.exports = function createEmitAuth({ logger }) {
     ctx.mqttClient = undefined;
     ctx.loggedIn = false;
 
+    // Clean up timeout references
+    try {
+      if (ctx._rTimeout) {
+        clearTimeout(ctx._rTimeout);
+        ctx._rTimeout = null;
+      }
+    } catch (_) { }
+
+    // Clean up tasks Map to prevent memory leak
+    try {
+      if (ctx.tasks && ctx.tasks instanceof Map) {
+        ctx.tasks.clear();
+      }
+    } catch (_) { }
+
+    // Clean up userInfo intervals
+    try {
+      if (ctx._userInfoIntervals && Array.isArray(ctx._userInfoIntervals)) {
+        ctx._userInfoIntervals.forEach(interval => {
+          try {
+            clearInterval(interval);
+          } catch (_) { }
+        });
+        ctx._userInfoIntervals = [];
+      }
+    } catch (_) { }
+
+    // Clean up autoSave intervals
+    try {
+      if (ctx._autoSaveInterval && Array.isArray(ctx._autoSaveInterval)) {
+        ctx._autoSaveInterval.forEach(interval => {
+          try {
+            clearInterval(interval);
+          } catch (_) { }
+        });
+        ctx._autoSaveInterval = [];
+      }
+    } catch (_) { }
+
+    // Clean up scheduler
+    try {
+      if (ctx._scheduler && typeof ctx._scheduler.destroy === "function") {
+        ctx._scheduler.destroy();
+        ctx._scheduler = undefined;
+      }
+    } catch (_) { }
+
+    // Clear global mqttClient reference if set
+    try {
+      if (global.mqttClient) {
+        delete global.mqttClient;
+      }
+    } catch (_) { }
+
     const msg = detail || reason;
     logger(`auth change -> ${reason}: ${msg}`, "error");
 

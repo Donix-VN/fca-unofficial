@@ -1,6 +1,6 @@
 "use strict";
 
-function lsRequest(ctx, payload, options, callback) {
+function sendReqMqtt(ctx, payload, options, callback) {
   return new Promise((resolve, reject) => {
     const cb = typeof options === "function" ? options : callback;
     const opts = typeof options === "object" && options ? options : {};
@@ -23,6 +23,25 @@ function lsRequest(ctx, payload, options, callback) {
       type: opts.type == null ? 3 : opts.type
     });
     let timer = null;
+    let cleaned = false;
+
+    // Cleanup function to ensure listeners and timers are always removed
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      try {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (ctx.mqttClient && typeof ctx.mqttClient.removeListener === "function") {
+          ctx.mqttClient.removeListener("message", handleRes);
+        }
+      } catch (err) {
+        // Ignore cleanup errors
+      }
+    };
+
     const handleRes = (topic, message) => {
       if (topic !== respTopic) return;
       let msg;
@@ -33,8 +52,7 @@ function lsRequest(ctx, payload, options, callback) {
       }
       if (msg.request_id !== reqID) return;
       if (typeof opts.filter === "function" && !opts.filter(msg)) return;
-      ctx.mqttClient.removeListener("message", handleRes);
-      if (timer) clearTimeout(timer);
+      cleanup();
       try {
         msg.payload = typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload;
       } catch { }
@@ -42,22 +60,37 @@ function lsRequest(ctx, payload, options, callback) {
       if (cb) cb(null, out);
       resolve(out);
     };
-    ctx.mqttClient.on("message", handleRes);
+
+    try {
+      ctx.mqttClient.on("message", handleRes);
+    } catch (err) {
+      cleanup();
+      const error = new Error("Failed to attach message listener");
+      if (cb) cb(error);
+      return reject(error);
+    }
+
     timer = setTimeout(() => {
-      ctx.mqttClient.removeListener("message", handleRes);
+      cleanup();
       const err = new Error("MQTT response timeout");
       if (cb) cb(err);
       reject(err);
     }, timeoutMs);
-    ctx.mqttClient.publish(reqTopic, form, { qos, retain }, (err) => {
-      if (err) {
-        if (timer) clearTimeout(timer);
-        ctx.mqttClient.removeListener("message", handleRes);
-        if (cb) cb(err);
-        reject(err);
-      }
-    });
+
+    try {
+      ctx.mqttClient.publish(reqTopic, form, { qos, retain }, (err) => {
+        if (err) {
+          cleanup();
+          if (cb) cb(err);
+          reject(err);
+        }
+      });
+    } catch (err) {
+      cleanup();
+      if (cb) cb(err);
+      reject(err);
+    }
   });
-};
+}
 
 module.exports = sendReqMqtt;

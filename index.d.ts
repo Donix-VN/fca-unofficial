@@ -184,9 +184,31 @@
     listen: (callback?: (err: Error | null, message: IFCAU_ListenMessage) => void) => EventEmitter;
     listenMqtt: (callback?: (err: Error | null, message: IFCAU_ListenMessage) => void) => EventEmitter & { stopListening: (callback?: () => void) => void };
 
+    // Middleware System
+    useMiddleware: (middleware: IFCAU_Middleware | string, fn?: IFCAU_Middleware) => () => void;
+    removeMiddleware: (identifier: string | IFCAU_Middleware) => boolean;
+    clearMiddleware: () => void;
+    listMiddleware: () => string[];
+    setMiddlewareEnabled: (name: string, enabled: boolean) => boolean;
+    readonly middlewareCount: number;
+
     // Configuration & Session
     setOptions: (options: Partial<IFCAU_Options>) => void;
     logout: (callback?: (err?: Error) => void) => Promise<void>;
+
+    // Message Scheduler
+    scheduler: {
+      scheduleMessage: (message: string | MessageObject, threadID: string | string[], when: Date | number | string, options?: { replyMessageID?: string; isGroup?: boolean; callback?: (err?: Error) => void }) => string;
+      cancelScheduledMessage: (id: string) => boolean;
+      getScheduledMessage: (id: string) => IFCAU_ScheduledMessage | null;
+      listScheduledMessages: () => IFCAU_ScheduledMessage[];
+      cancelAllScheduledMessages: () => number;
+      getScheduledCount: () => number;
+      cleanup: () => void;
+    };
+
+    // Auto-save AppState
+    enableAutoSaveAppState: (options?: { filePath?: string; interval?: number; saveOnLogin?: boolean }) => () => void;
   };
 
   // ============================================================================
@@ -678,6 +700,30 @@
       userID: string;
       name: string;
     };
+
+  // ============================================================================
+  // Middleware Types
+  // ============================================================================
+
+  export type IFCAU_Middleware = (event: IFCAU_ListenMessage, next: (err?: Error | false | null) => void) => void | Promise<void> | false | null;
+
+  // ============================================================================
+  // Scheduler Types
+  // ============================================================================
+
+  export type IFCAU_ScheduledMessage = {
+    id: string;
+    message: string | MessageObject;
+    threadID: string | string[];
+    timestamp: number;
+    createdAt: number;
+    options: {
+      replyMessageID?: string;
+      isGroup?: boolean;
+      callback?: (err?: Error) => void;
+    };
+    timeUntilSend: number;
+  };
 
   // ============================================================================
   // Options Type
