@@ -1,7 +1,7 @@
 "use strict";
 
 const { parseAndCheckLogin } = require("../../utils/client.js");
-const logger = require("../../../func/logger.js");
+const logger = require("../../../func/logger");
 const DEFAULT_DOC_ID = "24418640587785718";
 const DEFAULT_FRIENDLY_NAME = "CometHovercardQueryRendererQuery";
 const DEFAULT_CALLER_CLASS = "RelayModern";

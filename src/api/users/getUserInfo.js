@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const log = require("npmlog");
-const logger = require("../../../func/logger.js");
+const logger = require("../../../func/logger");
 const { parseAndCheckLogin } = require("../../utils/client.js");
 
 const DOC_PRIMARY = "5009315269112105";

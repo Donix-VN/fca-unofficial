@@ -1,6 +1,6 @@
 "use strict";
 const { formatDeltaEvent, formatMessage, _formatAttachment, formatDeltaMessage, formatDeltaReadReceipt, formatID, getType, decodeClientPayload } = require("../../../utils/format");
-const logger = require("../../../func/logger");
+const logger = require("../../../../func/logger");
 module.exports = function createParseDelta(deps) {
   const { markDelivery, parseAndCheckLogin } = deps;
   return function parseDelta(defaultFuncs, api, ctx, globalCallback, { delta }) {

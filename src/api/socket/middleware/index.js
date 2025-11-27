@@ -1,5 +1,5 @@
 "use strict";
-const logger = require("../../../func/logger");
+const logger = require("../../../../func/logger");
 
 /**
  * Middleware system for filtering and processing events before they are emitted
