@@ -465,7 +465,7 @@ async function hydrateJarFromDB(userID) {
   }
 }
 
-async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, ctxRef) {
+async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, ctxRef, hadAppStateInput = false) {
   const getUID = cs =>
     cs.find(c => c.key === "i_user")?.value ||
     cs.find(c => c.key === "c_user")?.value ||
@@ -473,6 +473,15 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
     cs.find(c => c.name === "c_user")?.value;
   let userID = getUID(currentCookies);
   if (userID) return { html: currentHtml, cookies: currentCookies, userID };
+  // If appState/Cookie was provided and is not dead (not checkpointed), skip backup
+  if (hadAppStateInput) {
+    const isCheckpoint = currentHtml.includes("/checkpoint/block/?next");
+    if (!isCheckpoint) {
+      // AppState provided and not checkpointed, skip backup - just throw error
+      throw new Error("Missing user cookie from provided appState");
+    }
+    // AppState is dead (checkpointed), proceed to backup/email login
+  }
   const hydrated = await hydrateJarFromDB(null);
   if (hydrated) {
     logger("AppState backup live — proceeding to login", "info");
@@ -679,7 +688,8 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           cookies.find(c => c.name === "i_user")?.value ||
           cookies.find(c => c.name === "c_user")?.value;
         if (!userID) {
-          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx);
+          // Pass skipBackup=true if appState/Cookie was originally provided
+          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, !!(appState || Cookie));
           html = retried.html;
           cookies = retried.cookies;
           userID = retried.userID;
