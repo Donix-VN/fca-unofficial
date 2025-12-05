@@ -281,11 +281,15 @@ function sort(obj) {
 async function setJarCookies(j, appstate) {
   const tasks = [];
   for (const c of appstate) {
+    const cookieName = c.name || c.key;
+    const cookieValue = c.value;
+    if (!cookieName || cookieValue === undefined) continue;
     const dom = (c.domain || ".facebook.com").replace(/^\./, "");
     const path = c.path || "/";
     const base1 = `https://${dom}${path}`;
     const base2 = `https://www.${dom}${path}`;
-    const str = `${c.key}=${c.value}; Domain=${c.domain || ".facebook.com"}; Path=${path};`;
+    const domain = c.domain || ".facebook.com";
+    const str = `${cookieName}=${cookieValue}; Domain=${domain}; Path=${path};`;
     tasks.push(j.setCookie(str, base1));
     tasks.push(j.setCookie(str, base2));
   }
@@ -570,41 +574,41 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       return null;
     };
     let userIDFromAppState = extractUIDFromAppState(appState);
-    try {
-      if (appState) {
-        if (typeof appState === "string") {
-          let parsed = appState;
-          try {
-            parsed = JSON.parse(appState);
-          } catch { }
-          if (Array.isArray(parsed)) {
-            const pairs = parsed.map(c => [c.name || c.key, c.value].join("="));
-            setJarFromPairs(jar, pairs, domain);
-          } else if (typeof parsed === "string") {
-            const pairs = normalizeCookieHeaderString(parsed);
-            if (!pairs.length) throw new Error("Empty appState cookie header");
-            setJarFromPairs(jar, pairs, domain);
+    (async () => {
+      try {
+        if (appState) {
+          if (typeof appState === "string") {
+            let parsed = appState;
+            try {
+              parsed = JSON.parse(appState);
+            } catch { }
+            if (Array.isArray(parsed)) {
+              // Use setJarCookies to properly handle individual cookie domains/paths
+              await setJarCookies(jar, parsed);
+            } else if (typeof parsed === "string") {
+              const pairs = normalizeCookieHeaderString(parsed);
+              if (!pairs.length) throw new Error("Empty appState cookie header");
+              setJarFromPairs(jar, pairs, domain);
+            } else {
+              throw new Error("Invalid appState format");
+            }
+          } else if (Array.isArray(appState)) {
+            // Use setJarCookies to properly handle individual cookie domains/paths
+            await setJarCookies(jar, appState);
           } else {
             throw new Error("Invalid appState format");
           }
-        } else if (Array.isArray(appState)) {
-          const pairs = appState.map(c => [c.name || c.key, c.value].join("="));
-          setJarFromPairs(jar, pairs, domain);
-        } else {
-          throw new Error("Invalid appState format");
         }
+        if (Cookie) {
+          let cookiePairs = [];
+          if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString(Cookie);
+          else if (Array.isArray(Cookie)) cookiePairs = Cookie.map(String).filter(Boolean);
+          else if (Cookie && typeof Cookie === "object") cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
+          if (cookiePairs.length) setJarFromPairs(jar, cookiePairs, domain);
+        }
+      } catch (e) {
+        return callback(e);
       }
-      if (Cookie) {
-        let cookiePairs = [];
-        if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString(Cookie);
-        else if (Array.isArray(Cookie)) cookiePairs = Cookie.map(String).filter(Boolean);
-        else if (Cookie && typeof Cookie === "object") cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
-        if (cookiePairs.length) setJarFromPairs(jar, cookiePairs, domain);
-      }
-    } catch (e) {
-      return callback(e);
-    }
-    (async () => {
       const ctx = { globalOptions, options: globalOptions, reconnectAttempts: 0 };
       ctx.bypassAutomation = async function (resp, j) {
         global.fca = global.fca || {};
