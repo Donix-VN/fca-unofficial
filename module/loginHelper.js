@@ -284,14 +284,31 @@ async function setJarCookies(j, appstate) {
     const cookieName = c.name || c.key;
     const cookieValue = c.value;
     if (!cookieName || cookieValue === undefined) continue;
-    const dom = (c.domain || ".facebook.com").replace(/^\./, "");
-    const path = c.path || "/";
-    const base1 = `https://${dom}${path}`;
-    const base2 = `https://www.${dom}${path}`;
-    const domain = c.domain || ".facebook.com";
-    const str = `${cookieName}=${cookieValue}; Domain=${domain}; Path=${path};`;
-    tasks.push(j.setCookie(str, base1));
-    tasks.push(j.setCookie(str, base2));
+
+    const cookieDomain = c.domain || ".facebook.com";
+    const cookiePath = c.path || "/";
+    const dom = cookieDomain.replace(/^\./, "");
+
+    // Format expires if provided
+    let expiresStr = "";
+    if (c.expires) {
+      const expiresDate = typeof c.expires === "number" ? new Date(c.expires) : new Date(c.expires);
+      expiresStr = `; expires=${expiresDate.toUTCString()}`;
+    }
+
+    // Build cookie string
+    const str = `${cookieName}=${cookieValue}${expiresStr}; Domain=${cookieDomain}; Path=${cookiePath};`;
+
+    // Set cookie for both http and https, with and without www
+    const base1 = `http://${dom}${cookiePath}`;
+    const base2 = `https://${dom}${cookiePath}`;
+    const base3 = `http://www.${dom}${cookiePath}`;
+    const base4 = `https://www.${dom}${cookiePath}`;
+
+    tasks.push(j.setCookie(str, base1).catch(() => { }));
+    tasks.push(j.setCookie(str, base2).catch(() => { }));
+    tasks.push(j.setCookie(str, base3).catch(() => { }));
+    tasks.push(j.setCookie(str, base4).catch(() => { }));
   }
   await Promise.all(tasks);
 }
@@ -577,23 +594,47 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
     (async () => {
       try {
         if (appState) {
-          if (typeof appState === "string") {
+          // Check and convert cookie to appState format
+          if (Array.isArray(appState) && appState.some(c => c.name)) {
+            // Convert name to key if needed
+            appState = appState.map(c => {
+              if (c.name && !c.key) {
+                c.key = c.name;
+                delete c.name;
+              }
+              return c;
+            });
+          } else if (typeof appState === "string") {
+            // Try to parse as JSON first
             let parsed = appState;
             try {
               parsed = JSON.parse(appState);
             } catch { }
+
             if (Array.isArray(parsed)) {
-              // Use setJarCookies to properly handle individual cookie domains/paths
-              await setJarCookies(jar, parsed);
-            } else if (typeof parsed === "string") {
-              const pairs = normalizeCookieHeaderString(parsed);
-              if (!pairs.length) throw new Error("Empty appState cookie header");
-              setJarFromPairs(jar, pairs, domain);
+              // Already parsed as array, use it
+              appState = parsed;
             } else {
-              throw new Error("Invalid appState format");
+              // Parse string cookie format (key=value; key2=value2)
+              const arrayAppState = [];
+              appState.split(';').forEach(c => {
+                const [key, value] = c.split('=');
+                if (key && value) {
+                  arrayAppState.push({
+                    key: key.trim(),
+                    value: value.trim(),
+                    domain: ".facebook.com",
+                    path: "/",
+                    expires: new Date().getTime() + 1000 * 60 * 60 * 24 * 365
+                  });
+                }
+              });
+              appState = arrayAppState;
             }
-          } else if (Array.isArray(appState)) {
-            // Use setJarCookies to properly handle individual cookie domains/paths
+          }
+
+          // Set cookies into jar with individual domain/path
+          if (Array.isArray(appState)) {
             await setJarCookies(jar, appState);
           } else {
             throw new Error("Invalid appState format");
