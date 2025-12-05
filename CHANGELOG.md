@@ -155,3 +155,6 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 
 ## v3.0.8 - 2025-11-27
 - Hotfix / auto bump
+
+## v3.0.9 - 2025-12-05
+- Hotfix / auto bump

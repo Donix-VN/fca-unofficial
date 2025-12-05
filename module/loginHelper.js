@@ -471,13 +471,30 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
     cs.find(c => c.key === "c_user")?.value ||
     cs.find(c => c.name === "i_user")?.value ||
     cs.find(c => c.name === "c_user")?.value;
+  const htmlUID = body => {
+    const s = typeof body === "string" ? body : String(body ?? "");
+    return s.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s.match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1];
+  };
   let userID = getUID(currentCookies);
+  // Also try to extract userID from HTML if not found in cookies
+  if (!userID) {
+    userID = htmlUID(currentHtml);
+  }
   if (userID) return { html: currentHtml, cookies: currentCookies, userID };
   // If appState/Cookie was provided and is not dead (not checkpointed), skip backup
   if (hadAppStateInput) {
     const isCheckpoint = currentHtml.includes("/checkpoint/block/?next");
     if (!isCheckpoint) {
-      // AppState provided and not checkpointed, skip backup - just throw error
+      // AppState provided and not checkpointed, but userID not found
+      // This might be a temporary issue - try to refresh cookies from jar
+      try {
+        const refreshedCookies = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
+        userID = getUID(refreshedCookies);
+        if (userID) {
+          return { html: currentHtml, cookies: refreshedCookies, userID };
+        }
+      } catch { }
+      // If still no userID, skip backup and throw error
       throw new Error("Missing user cookie from provided appState");
     }
     // AppState is dead (checkpointed), proceed to backup/email login
@@ -533,6 +550,26 @@ function makeLogin(j, email, password, globalOptions) {
 function loginHelper(appState, Cookie, email, password, globalOptions, callback) {
   try {
     const domain = ".facebook.com";
+    // Helper to extract userID from appState input
+    const extractUIDFromAppState = (appStateInput) => {
+      if (!appStateInput) return null;
+      let parsed = appStateInput;
+      if (typeof appStateInput === "string") {
+        try {
+          parsed = JSON.parse(appStateInput);
+        } catch {
+          return null;
+        }
+      }
+      if (Array.isArray(parsed)) {
+        const cUser = parsed.find(c => (c.key === "c_user" || c.name === "c_user"));
+        if (cUser) return cUser.value;
+        const iUser = parsed.find(c => (c.key === "i_user" || c.name === "i_user"));
+        if (iUser) return iUser.value;
+      }
+      return null;
+    };
+    let userIDFromAppState = extractUIDFromAppState(appState);
     try {
       if (appState) {
         if (typeof appState === "string") {
@@ -682,13 +719,26 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         const processed = (await ctx.bypassAutomation(res, jar)) || res;
         let html = processed && processed.data ? processed.data : "";
         let cookies = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
-        let userID =
-          cookies.find(c => c.key === "i_user")?.value ||
-          cookies.find(c => c.key === "c_user")?.value ||
-          cookies.find(c => c.name === "i_user")?.value ||
-          cookies.find(c => c.name === "c_user")?.value;
+        const getUIDFromCookies = cs =>
+          cs.find(c => c.key === "i_user")?.value ||
+          cs.find(c => c.key === "c_user")?.value ||
+          cs.find(c => c.name === "i_user")?.value ||
+          cs.find(c => c.name === "c_user")?.value;
+        const getUIDFromHTML = body => {
+          const s = typeof body === "string" ? body : String(body ?? "");
+          return s.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s.match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1];
+        };
+        let userID = getUIDFromCookies(cookies);
+        // Also try to extract userID from HTML if not found in cookies
         if (!userID) {
-          // Pass skipBackup=true if appState/Cookie was originally provided
+          userID = getUIDFromHTML(html);
+        }
+        // If still not found and appState was provided, use userID from appState input as fallback
+        if (!userID && userIDFromAppState) {
+          userID = userIDFromAppState;
+        }
+        if (!userID) {
+          // Pass hadAppStateInput=true if appState/Cookie was originally provided
           const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, !!(appState || Cookie));
           html = retried.html;
           cookies = retried.cookies;
