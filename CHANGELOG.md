@@ -167,3 +167,6 @@ Too lazy to write changelog, sorry! (will write changelog in the next release, t
 
 ## v3.0.12 - 2025-12-05
 - Hotfix / auto bump
+
+## v3.0.15 - 2025-12-12
+- Hotfix / auto bump

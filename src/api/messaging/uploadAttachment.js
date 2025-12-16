@@ -20,14 +20,13 @@ module.exports = function(defaultFuncs, api, ctx) {
       }
 
       const form = {
-        upload_1024: attachments[i],
-        voice_clip: "true"
+        farr: attachments[i]
       };
 
       uploads.push(
         defaultFuncs
           .postFormData(
-            "https://upload.facebook.com/ajax/mercury/upload.php",
+            "https://www.facebook.com/ajax/mercury/upload.php",
             ctx.jar,
             form,
             {}

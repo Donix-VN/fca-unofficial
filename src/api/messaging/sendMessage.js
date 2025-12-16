@@ -24,9 +24,9 @@ module.exports = function (defaultFuncs, api, ctx) {
   async function uploadAttachment(streams) {
     const uploads = streams.map(stream => {
       if (!isReadableStream(stream)) throw { error: "Attachment should be a readable stream and not " + getType(stream) + "." };
-      const form = { upload_1024: stream, voice_clip: "true" };
+      const form = { farr: stream };
       return defaultFuncs
-        .postFormData("https://upload.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
+        .postFormData("https://www.facebook.com/ajax/mercury/upload.php", ctx.jar, form, {})
         .then(parseAndCheckLogin(ctx, defaultFuncs))
         .then(resData => {
           if (resData.error) throw resData;
