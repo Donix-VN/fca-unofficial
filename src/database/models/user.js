@@ -17,8 +17,22 @@ module.exports = function (sequelize) {
         unique: true
       },
       data: {
-        type: DataTypes.JSONB,
-        allowNull: true
+        type: DataTypes.TEXT,
+        allowNull: true,
+        get() {
+          const value = this.getDataValue('data');
+          if (typeof value === 'string') {
+            try {
+              return JSON.parse(value);
+            } catch {
+              return value;
+            }
+          }
+          return value;
+        },
+        set(value) {
+          this.setDataValue('data', typeof value === 'string' ? value : JSON.stringify(value));
+        }
       }
     },
     {
