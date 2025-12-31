@@ -289,26 +289,101 @@ async function setJarCookies(j, appstate) {
     const cookiePath = c.path || "/";
     const dom = cookieDomain.replace(/^\./, "");
 
-    // Format expires if provided
+    // Handle expirationDate (can be in seconds or milliseconds)
     let expiresStr = "";
-    if (c.expires) {
+    if (c.expirationDate !== undefined) {
+      let expiresDate;
+      if (typeof c.expirationDate === "number") {
+        // If expirationDate is less than a year from now in seconds, treat as seconds
+        // Otherwise treat as milliseconds
+        const now = Date.now();
+        const oneYearInMs = 365 * 24 * 60 * 60 * 1000;
+        if (c.expirationDate < (now + oneYearInMs) / 1000) {
+          expiresDate = new Date(c.expirationDate * 1000);
+        } else {
+          expiresDate = new Date(c.expirationDate);
+        }
+      } else {
+        expiresDate = new Date(c.expirationDate);
+      }
+      expiresStr = `; expires=${expiresDate.toUTCString()}`;
+    } else if (c.expires) {
       const expiresDate = typeof c.expires === "number" ? new Date(c.expires) : new Date(c.expires);
       expiresStr = `; expires=${expiresDate.toUTCString()}`;
     }
 
-    // Build cookie string
-    const str = `${cookieName}=${cookieValue}${expiresStr}; Domain=${cookieDomain}; Path=${cookiePath};`;
+    // Helper function to build cookie string
+    const buildCookieString = (domainOverride = null) => {
+      const domain = domainOverride || cookieDomain;
+      let cookieParts = [`${cookieName}=${cookieValue}${expiresStr}`];
+      cookieParts.push(`Domain=${domain}`);
+      cookieParts.push(`Path=${cookiePath}`);
 
-    // Set cookie for both http and https, with and without www
-    const base1 = `http://${dom}${cookiePath}`;
-    const base2 = `https://${dom}${cookiePath}`;
-    const base3 = `http://www.${dom}${cookiePath}`;
-    const base4 = `https://www.${dom}${cookiePath}`;
+      // Add Secure flag if secure is true
+      if (c.secure === true) {
+        cookieParts.push("Secure");
+      }
 
-    tasks.push(j.setCookie(str, base1).catch(() => { }));
-    tasks.push(j.setCookie(str, base2).catch(() => { }));
-    tasks.push(j.setCookie(str, base3).catch(() => { }));
-    tasks.push(j.setCookie(str, base4).catch(() => { }));
+      // Add HttpOnly flag if httpOnly is true
+      if (c.httpOnly === true) {
+        cookieParts.push("HttpOnly");
+      }
+
+      // Add SameSite attribute if provided
+      if (c.sameSite) {
+        const sameSiteValue = String(c.sameSite).toLowerCase();
+        if (["strict", "lax", "none"].includes(sameSiteValue)) {
+          cookieParts.push(`SameSite=${sameSiteValue.charAt(0).toUpperCase() + sameSiteValue.slice(1)}`);
+        }
+      }
+
+      return cookieParts.join("; ");
+    };
+
+    // Determine target URLs and cookie strings based on domain
+    const cookieConfigs = [];
+
+    // For .facebook.com domain, set for both facebook.com and messenger.com
+    if (cookieDomain === ".facebook.com" || cookieDomain === "facebook.com") {
+      // Set for facebook.com with .facebook.com domain
+      cookieConfigs.push({ url: `http://${dom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `https://${dom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `http://www.${dom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `https://www.${dom}${cookiePath}`, cookieStr: buildCookieString() });
+
+      // Set for messenger.com with .messenger.com domain (or without domain for host-only)
+      // Use .messenger.com domain to allow cross-subdomain sharing
+      cookieConfigs.push({ url: `http://messenger.com${cookiePath}`, cookieStr: buildCookieString(".messenger.com") });
+      cookieConfigs.push({ url: `https://messenger.com${cookiePath}`, cookieStr: buildCookieString(".messenger.com") });
+      cookieConfigs.push({ url: `http://www.messenger.com${cookiePath}`, cookieStr: buildCookieString(".messenger.com") });
+      cookieConfigs.push({ url: `https://www.messenger.com${cookiePath}`, cookieStr: buildCookieString(".messenger.com") });
+    } else if (cookieDomain === ".messenger.com" || cookieDomain === "messenger.com") {
+      // Set for messenger.com only
+      const messengerDom = cookieDomain.replace(/^\./, "");
+      cookieConfigs.push({ url: `http://${messengerDom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `https://${messengerDom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `http://www.${messengerDom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `https://www.${messengerDom}${cookiePath}`, cookieStr: buildCookieString() });
+    } else {
+      // For other domains, set normally
+      cookieConfigs.push({ url: `http://${dom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `https://${dom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `http://www.${dom}${cookiePath}`, cookieStr: buildCookieString() });
+      cookieConfigs.push({ url: `https://www.${dom}${cookiePath}`, cookieStr: buildCookieString() });
+    }
+
+    // Set cookie for all target URLs, silently catch domain errors
+    for (const config of cookieConfigs) {
+      tasks.push(j.setCookie(config.cookieStr, config.url).catch((err) => {
+        // Silently ignore domain mismatch errors for cross-domain cookies
+        // These are expected when setting cookies across domains
+        if (err && err.message && err.message.includes("Cookie not in this host's domain")) {
+          return; // Expected error, ignore
+        }
+        // Log other errors but don't throw
+        return;
+      }));
+    }
   }
   await Promise.all(tasks);
 }
