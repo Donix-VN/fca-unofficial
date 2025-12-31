@@ -182,28 +182,45 @@ function cookieHeaderFromJar(j) {
 let uniqueIndexEnsured = false;
 
 function getBackupModel() {
-  if (!models || !models.sequelize || !models.Sequelize) return null;
-  const sequelize = models.sequelize;
-  const { DataTypes } = models.Sequelize;
-  if (sequelize.models && sequelize.models.AppStateBackup) return sequelize.models.AppStateBackup;
-  const dialect = typeof sequelize.getDialect === "function" ? sequelize.getDialect() : "sqlite";
-  const LongText = (dialect === "mysql" || dialect === "mariadb") ? DataTypes.TEXT("long") : DataTypes.TEXT;
-  const AppStateBackup = sequelize.define(
-    "AppStateBackup",
-    {
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      userID: { type: DataTypes.STRING, allowNull: false },
-      type: { type: DataTypes.STRING, allowNull: false },
-      data: { type: LongText }
-    },
-    { tableName: "app_state_backups", timestamps: true, indexes: [{ unique: true, fields: ["userID", "type"] }] }
-  );
-  return AppStateBackup;
+  try {
+    if (!models || !models.sequelize || !models.Sequelize) return null;
+    const sequelize = models.sequelize;
+
+    // Validate that sequelize is a proper Sequelize instance
+    if (!sequelize || typeof sequelize.define !== "function") return null;
+
+    const { DataTypes } = models.Sequelize;
+    if (sequelize.models && sequelize.models.AppStateBackup) return sequelize.models.AppStateBackup;
+    const dialect = typeof sequelize.getDialect === "function" ? sequelize.getDialect() : "sqlite";
+    const LongText = (dialect === "mysql" || dialect === "mariadb") ? DataTypes.TEXT("long") : DataTypes.TEXT;
+
+    try {
+      const AppStateBackup = sequelize.define(
+        "AppStateBackup",
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          userID: { type: DataTypes.STRING, allowNull: false },
+          type: { type: DataTypes.STRING, allowNull: false },
+          data: { type: LongText }
+        },
+        { tableName: "app_state_backups", timestamps: true, indexes: [{ unique: true, fields: ["userID", "type"] }] }
+      );
+      return AppStateBackup;
+    } catch (defineError) {
+      // If define fails, log and return null
+      logger(`Failed to define AppStateBackup model: ${defineError && defineError.message ? defineError.message : String(defineError)}`, "warn");
+      return null;
+    }
+  } catch (e) {
+    // Silently handle any errors in getBackupModel
+    return null;
+  }
 }
 
 async function ensureUniqueIndex(sequelize) {
-  if (uniqueIndexEnsured) return;
+  if (uniqueIndexEnsured || !sequelize) return;
   try {
+    if (typeof sequelize.getQueryInterface !== "function") return;
     await sequelize.getQueryInterface().addIndex("app_state_backups", ["userID", "type"], { unique: true, name: "app_state_user_type_unique" });
   } catch { }
   uniqueIndexEnsured = true;
@@ -225,6 +242,7 @@ async function backupAppStateSQL(j, userID) {
   try {
     const Model = getBackupModel();
     if (!Model) return;
+    if (!models || !models.sequelize) return;
     await Model.sync();
     await ensureUniqueIndex(models.sequelize);
     const appJson = getAppState(j);
@@ -910,8 +928,12 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
             }
           })
           .catch(function (error) {
-            console.error(error);
-            console.error("Database connection failed:", error && error.message ? error.message : String(error));
+            // Silently handle database errors - they're not critical for login
+            const errorMsg = error && error.message ? error.message : String(error);
+            if (!errorMsg.includes("No Sequelize instance passed")) {
+              // Only log non-Sequelize instance errors
+              logger(`Database connection failed: ${errorMsg}`, "warn");
+            }
           });
         logger("FCA fix/update by DongDev (Donix-VN)", "info");
         const ctxMain = {

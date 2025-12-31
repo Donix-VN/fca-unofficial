@@ -20,6 +20,11 @@ if (!global.fca._errorHandlersInstalled) {
         const errorCode = reason.code || reason.cause?.code;
         const errorMessage = reason.message || String(reason);
 
+        // Suppress Sequelize instance errors (handled gracefully in getBackupModel)
+        if (errorMessage.includes("No Sequelize instance passed")) {
+          return; // Silently ignore - already handled
+        }
+
         // Handle fetch timeout errors gracefully
         if (errorCode === "UND_ERR_CONNECT_TIMEOUT" ||
             errorCode === "ETIMEDOUT" ||
@@ -53,6 +58,11 @@ if (!global.fca._errorHandlersInstalled) {
     try {
       const errorMessage = error.message || String(error);
       const errorCode = error.code;
+
+      // Suppress Sequelize instance errors (handled gracefully in getBackupModel)
+      if (errorMessage.includes("No Sequelize instance passed")) {
+        return; // Silently ignore - already handled
+      }
 
       // Handle fetch/network errors
       if (errorCode === "UND_ERR_CONNECT_TIMEOUT" ||

@@ -61,7 +61,6 @@ module.exports = function (defaultFuncs, api, ctx, opts) {
     }
     defaultFuncs.post = postSafe;
     ctx._postGuarded = true;
-    logger("postSafe guard installed for defaultFuncs.post", "info");
     return postSafe;
   }
 
